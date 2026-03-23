@@ -1,6 +1,6 @@
 {
-    "name": "memorizer",
-    "short_name": "memorizer",
+    "name": "Memorizer",
+    "short_name": "Memorizer",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

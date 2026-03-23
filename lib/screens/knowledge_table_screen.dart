@@ -14,6 +14,10 @@ class KnowledgeTableScreen extends StatefulWidget {
 }
 
 class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
+  final GlobalKey<PopupMenuButtonState<_FooterMenuAction>>
+      _footerMenuButtonKey = GlobalKey<PopupMenuButtonState<_FooterMenuAction>>();
+  final ScrollController _tableScrollController = ScrollController();
+
   late List<String> _headers;
   late List<List<String>> _dataRows;
 
@@ -29,9 +33,11 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
   /// Fractional widths for each visual data column (values sum to 1.0).
   late List<double> _colWidthFractions;
 
+  /// Row anchor keys used for auto-scrolling to newly revealed rows.
+  late List<GlobalKey> _rowKeys;
+
   int? _draggingColVisualIdx;
   int? _dragTargetVisualIdx;
-  double _dragTravelDistance = 0;
   int? _lastOpenedRowIdx;
   int? _lastOpenedOrigColIdx;
 
@@ -42,10 +48,9 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
   bool _isRevealed(int origRowIdx, int visualColIdx) =>
       _revealed[origRowIdx][_columnOrder[visualColIdx]];
 
-    bool _isLastOpened(int origRowIdx, int visualColIdx) =>
+  bool _isLastOpened(int origRowIdx, int visualColIdx) =>
       _lastOpenedRowIdx == origRowIdx &&
       _lastOpenedOrigColIdx == _columnOrder[visualColIdx];
-
 
   void _setRevealed(int origRowIdx, int visualColIdx, bool value) =>
       setState(() {
@@ -108,6 +113,30 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
       (_) => List.filled(_numCols, false, growable: true),
       growable: true,
     );
+    _rowKeys = List.generate(_dataRows.length, (_) => GlobalKey(), growable: true);
+  }
+
+  @override
+  void dispose() {
+    _tableScrollController.dispose();
+    super.dispose();
+  }
+
+  void _scrollRowIntoView(int origRowIdx) {
+    if (origRowIdx < 0 || origRowIdx >= _rowKeys.length) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final targetContext = _rowKeys[origRowIdx].currentContext;
+      if (targetContext == null) return;
+
+      Scrollable.ensureVisible(
+        targetContext,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+        alignment: 0.7,
+      );
+    });
   }
 
   // ── button actions ─────────────────────────────────────────────
@@ -132,6 +161,7 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
       final origRowIdx = _displayOrder[rowPos];
       if (!_isRevealed(origRowIdx, visualColIdx)) {
         _setRevealed(origRowIdx, visualColIdx, true);
+        _scrollRowIntoView(origRowIdx);
         return;
       }
     }
@@ -139,6 +169,12 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
 
   void _randomise() {
     setState(() => _displayOrder.shuffle(Random()));
+  }
+
+  void _reorder() {
+    setState(() {
+      _displayOrder = List.generate(_dataRows.length, (i) => i, growable: true);
+    });
   }
 
   void _closeAll() {
@@ -165,6 +201,23 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
         _lastOpenedOrigColIdx = _columnOrder.last;
       }
     });
+  }
+
+  void _handleFooterMenuAction(_FooterMenuAction action) {
+    switch (action) {
+      case _FooterMenuAction.reorder:
+        _reorder();
+        return;
+      case _FooterMenuAction.randomise:
+        _randomise();
+        return;
+      case _FooterMenuAction.hideAll:
+        _closeAll();
+        return;
+      case _FooterMenuAction.showAll:
+        _openAll();
+        return;
+    }
   }
 
   // ── build ──────────────────────────────────────────────────────
@@ -195,6 +248,7 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                       const titleHeight = 56.0;
                       final dividerColor = Theme.of(context).dividerColor;
                       final dataTable = SingleChildScrollView(
+                        controller: _tableScrollController,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -228,9 +282,12 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                               ),
                               children: _displayOrder.map((origIdx) {
                                 final row = _dataRows[origIdx];
-                                return TableRow(children: [
+                                return TableRow(
+                                  key: ValueKey(origIdx),
+                                  children: [
                                   // Index
                                   Container(
+                                    key: _rowKeys[origIdx],
                                     alignment: Alignment.center,
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 2, vertical: 6),
@@ -324,36 +381,78 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                 // ── command buttons ────────────────────────────
                 const Divider(height: 1),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    alignment: WrapAlignment.center,
+                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
+                  child: Row(
                     children: [
-                      FilledButton.icon(
-                        onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.menu, size: 18),
-                        label: const Text('Menu'),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () => Navigator.pop(context),
+                          icon: const Icon(Icons.arrow_back, size: 18),
+                          label: const Text(
+                            'Back to Menu',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
                       ),
-                      FilledButton.tonalIcon(
-                        onPressed: _randomise,
-                        icon: const Icon(Icons.shuffle, size: 18),
-                        label: const Text('All'),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: PopupMenuButton<_FooterMenuAction>(
+                          key: _footerMenuButtonKey,
+                          onSelected: _handleFooterMenuAction,
+                          itemBuilder: (context) => const [
+                            PopupMenuItem(
+                              value: _FooterMenuAction.reorder,
+                              child: ListTile(
+                                leading: Icon(Icons.reorder),
+                                title: Text('Reorder'),
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: _FooterMenuAction.randomise,
+                              child: ListTile(
+                                leading: Icon(Icons.shuffle),
+                                title: Text('Randomise'),
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: _FooterMenuAction.hideAll,
+                              child: ListTile(
+                                leading: Icon(Icons.visibility_off),
+                                title: Text('Hide All'),
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: _FooterMenuAction.showAll,
+                              child: ListTile(
+                                leading: Icon(Icons.visibility),
+                                title: Text('Show All'),
+                              ),
+                            ),
+                          ],
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: () => _footerMenuButtonKey.currentState
+                                  ?.showButtonMenu(),
+                              icon: const Icon(
+                                Icons.arrow_drop_down_circle_outlined,
+                                size: 18,
+                              ),
+                              label: const Text('Options'),
+                            ),
+                          ),
+                        ),
                       ),
-                      FilledButton.tonalIcon(
-                        onPressed: _closeAll,
-                        icon: const Icon(Icons.visibility_off, size: 18),
-                        label: const Text('All'),
-                      ),
-                      FilledButton.tonalIcon(
-                        onPressed: _openAll,
-                        icon: const Icon(Icons.visibility, size: 18),
-                        label: const Text('All'),
-                      ),
-                      FilledButton.icon(
-                        onPressed: _showNext,
-                        icon: const Icon(Icons.visibility, size: 18),
-                        label: const Text('Next'),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _showNext,
+                          icon: const Icon(Icons.visibility, size: 18),
+                          label: const Text(
+                            'Show Next',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -379,8 +478,8 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
         _draggingColVisualIdx != visualColIdx;
     final highlightColor = const Color.fromARGB(255, 215, 223, 147).withAlpha(90);
     final cellColor = isLastOpened
-      ? highlightColor
-      : (revealed ? null : hiddenColor);
+        ? highlightColor
+        : (revealed ? null : hiddenColor);
 
     return DragTarget<int>(
       onWillAcceptWithDetails: (details) {
@@ -410,26 +509,16 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
         });
       },
       builder: (context, candidateData, _) {
-        return Draggable<int>(
+        return LongPressDraggable<int>(
           data: visualColIdx,
           onDragStarted: () => setState(() {
             _draggingColVisualIdx = visualColIdx;
-            _dragTravelDistance = 0;
           }),
-          onDragUpdate: (details) {
-            _dragTravelDistance += details.delta.distance;
-          },
           onDragEnd: (details) {
-            final shouldToggle =
-                !details.wasAccepted && _dragTravelDistance < 12;
             setState(() {
               _draggingColVisualIdx = null;
               _dragTargetVisualIdx = null;
-              _dragTravelDistance = 0;
             });
-            if (shouldToggle) {
-              onTap();
-            }
           },
           feedback: Material(
             elevation: 6,
@@ -467,10 +556,8 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
               behavior: HitTestBehavior.opaque,
               onTap: onTap,
               child: Container(
-                alignment:
-                    revealed ? Alignment.centerLeft : Alignment.center,
-                padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                alignment: revealed ? Alignment.centerLeft : Alignment.center,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                 child: revealed
                     ? Text(text)
                     : Center(
@@ -490,5 +577,12 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
       },
     );
   }
+}
+
+enum _FooterMenuAction {
+  reorder,
+  randomise,
+  hideAll,
+  showAll,
 }
 
