@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    
+    {
+      "name": "Flutter (Windows)",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "windows",
+      "program": "lib/main.dart"
+    },
+    {
+      "name": "Flutter (Windows Profile)",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "windows",
+      "flutterMode": "profile",
+      "program": "lib/main.dart"
+    },
+    {
+      "name": "Flutter (Windows Release)",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "windows",
+      "flutterMode": "release",
+      "program": "lib/main.dart"
+    }
+  ]
+}
