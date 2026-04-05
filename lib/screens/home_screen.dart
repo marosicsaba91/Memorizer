@@ -1,5 +1,8 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
+import '../models/knowledge_entry.dart';
 import '../models/knowledge_table.dart';
 import '../services/sheets_service.dart';
 import '../services/storage_service.dart';
@@ -18,6 +21,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<KnowledgeTable> _tables = [];
   bool _isRefreshing = false;
+  final Set<String> _updatingTableNames = <String>{};
 
   @override
   void initState() {
@@ -46,8 +50,10 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() => _tables = tables);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text(
-                  '${tables.length} table${tables.length == 1 ? '' : 's'} updated')),
+            content: Text(
+              '${tables.length} table${tables.length == 1 ? '' : 's'} updated',
+            ),
+          ),
         );
       }
     } catch (e) {
@@ -61,6 +67,56 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } finally {
       if (mounted) setState(() => _isRefreshing = false);
+    }
+  }
+
+  Future<void> _refreshSingleTable(KnowledgeTable table) async {
+    if (_updatingTableNames.contains(table.name)) return;
+
+    final sourceUrl = table.sourceUrl?.trim();
+    if (sourceUrl == null || sourceUrl.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('This table has no saved source URL to update from.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    setState(() => _updatingTableNames.add(table.name));
+    try {
+      final refreshed = await _sheetsService.fetchKnowledgeTable(
+        KnowledgeEntry(name: table.name, sheetUrl: sourceUrl),
+      );
+
+      final index = _tables.indexWhere((t) => t.name == table.name);
+      if (index == -1) return;
+
+      final updatedTables = List<KnowledgeTable>.from(_tables);
+      updatedTables[index] = refreshed;
+      await _storageService.saveKnowledgeTables(updatedTables);
+
+      if (mounted) {
+        setState(() => _tables = updatedTables);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Updated ${table.name}')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Update failed for ${table.name}: $e'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _updatingTableNames.remove(table.name));
+      }
     }
   }
 
@@ -78,8 +134,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: SizedBox(
                       width: 20,
                       height: 20,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2.5, color: Colors.white),
+                      child: CircularProgressIndicator(strokeWidth: 3.5),
                     ),
                   ),
                 )
@@ -103,20 +158,40 @@ class _HomeScreenState extends State<HomeScreen> {
               itemCount: _tables.length,
               itemBuilder: (context, index) {
                 final table = _tables[index];
+                final dataRowCount = max(0, table.rows.length - 1);
+                final isUpdating = _updatingTableNames.contains(table.name);
                 return Card(
                   margin: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 4),
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
                   child: ListTile(
                     leading: const Icon(Icons.table_chart_outlined),
                     title: Text(table.name),
                     subtitle: Text(
-                        '${table.rows.length} row${table.rows.length == 1 ? '' : 's'}'),
-                    trailing: const Icon(Icons.chevron_right),
+                      '$dataRowCount row${dataRowCount == 1 ? '' : 's'}',
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isUpdating)
+                          const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        else
+                          IconButton(
+                            icon: const Icon(Icons.refresh),
+                            tooltip: 'Update this table',
+                            onPressed: () => _refreshSingleTable(table),
+                          ),
+                      ],
+                    ),
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) =>
-                            KnowledgeTableScreen(table: table),
+                        builder: (_) => KnowledgeTableScreen(table: table),
                       ),
                     ),
                   ),

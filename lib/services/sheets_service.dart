@@ -24,18 +24,20 @@ class SheetsService {
     final rows = await _fetchCsv(csvUrl);
     return rows
         .where((r) => r.length >= 2 && r[0].trim().isNotEmpty)
-        .map((r) =>
-            KnowledgeEntry(name: r[0].trim(), sheetUrl: r[1].trim()))
+        .map((r) => KnowledgeEntry(name: r[0].trim(), sheetUrl: r[1].trim()))
         .toList();
   }
 
   /// Downloads a single knowledge table and returns it as a
   /// [KnowledgeTable] with all rows (including any header row).
   Future<KnowledgeTable> fetchKnowledgeTable(KnowledgeEntry entry) async {
-    final csvUrl =
-        _toExportCsvUrl(entry.sheetUrl) ?? entry.sheetUrl;
+    final csvUrl = _toExportCsvUrl(entry.sheetUrl) ?? entry.sheetUrl;
     final rows = await _fetchCsv(csvUrl);
-    return KnowledgeTable(name: entry.name, rows: rows);
+    return KnowledgeTable(
+      name: entry.name,
+      sourceUrl: entry.sheetUrl,
+      rows: _trimTable(rows),
+    );
   }
 
   // ------------------------------------------------------------------
@@ -45,12 +47,58 @@ class SheetsService {
   Future<List<List<String>>> _fetchCsv(String url) async {
     final response = await http.get(Uri.parse(url));
     if (response.statusCode != 200) {
-      throw Exception(
-          'HTTP ${response.statusCode} when fetching $url');
+      throw Exception('HTTP ${response.statusCode} when fetching $url');
     }
     // Explicitly decode as UTF-8 to properly handle special characters.
     final body = utf8.decode(response.bodyBytes);
     return _parseCsv(body);
+  }
+
+  /// Crops a table to a rectangular region bounded by:
+  /// - the first completely empty row (exclusive), and
+  /// - the first completely empty column (exclusive).
+  List<List<String>> _trimTable(List<List<String>> rows) {
+    if (rows.isEmpty) return rows;
+
+    final rowLimit = _findFirstEmptyRow(rows);
+    if (rowLimit == 0) return const <List<String>>[];
+
+    final limitedRows = rows.take(rowLimit).toList(growable: false);
+    final columnLimit = _findFirstEmptyColumn(limitedRows);
+    if (columnLimit == 0) return const <List<String>>[];
+
+    return limitedRows
+        .map((row) => row.take(columnLimit).toList(growable: false))
+        .toList(growable: false);
+  }
+
+  int _findFirstEmptyRow(List<List<String>> rows) {
+    for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      final row = rows[rowIndex];
+      final hasNonEmptyCell = row.any((cell) => cell.trim().isNotEmpty);
+      if (!hasNonEmptyCell) return rowIndex;
+    }
+    return rows.length;
+  }
+
+  int _findFirstEmptyColumn(List<List<String>> rows) {
+    var maxColumns = 0;
+    for (final row in rows) {
+      if (row.length > maxColumns) maxColumns = row.length;
+    }
+
+    for (var columnIndex = 0; columnIndex < maxColumns; columnIndex++) {
+      var hasNonEmptyCell = false;
+      for (final row in rows) {
+        final cell = columnIndex < row.length ? row[columnIndex] : '';
+        if (cell.trim().isNotEmpty) {
+          hasNonEmptyCell = true;
+          break;
+        }
+      }
+      if (!hasNonEmptyCell) return columnIndex;
+    }
+    return maxColumns;
   }
 
   /// Converts any supported Google Sheets URL into the CSV export form.
@@ -74,11 +122,7 @@ class SheetsService {
     // Extract gid from the fragment (#gid=0) or query parameter.
     String? gid = uri.queryParameters['gid'];
     if (gid == null && uri.fragment.contains('gid=')) {
-      gid = uri.fragment
-          .split('gid=')
-          .last
-          .split('&')
-          .first;
+      gid = uri.fragment.split('gid=').last.split('&').first;
     }
 
     var exportUrl =
@@ -91,8 +135,7 @@ class SheetsService {
   /// quoted fields containing commas or newlines.
   List<List<String>> _parseCsv(String content) {
     // Normalise line endings so we can work with '\n' only.
-    final text =
-        content.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    final text = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
 
     final result = <List<String>>[];
     var i = 0;
@@ -152,8 +195,7 @@ class SheetsService {
       if (i < text.length && text[i] == '\n') i++;
 
       // Skip completely empty rows (blank lines at end of file).
-      if (row.isNotEmpty &&
-          !(row.length == 1 && row[0].isEmpty)) {
+      if (row.isNotEmpty && !(row.length == 1 && row[0].isEmpty)) {
         result.add(row);
       }
 
