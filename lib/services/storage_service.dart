@@ -5,8 +5,28 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/knowledge_table.dart';
 import '../models/row_save_data.dart';
 import '../models/profile_settings.dart';
+import '../models/game_session.dart';
 
 class StorageService {
+  Future<Map<String, dynamic>?> loadGameSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('game/settings');
+    if (raw == null) return null;
+    try {
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> saveGameSettings(GameSettings settings, int finiteCount) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      'game/settings',
+      jsonEncode({...settings.toJson(), 'finiteQuestionCount': finiteCount}),
+    );
+  }
+
   Future<ProfileSettings> loadProfileSettings() async {
     final prefs = await SharedPreferences.getInstance();
     return ProfileSettings(

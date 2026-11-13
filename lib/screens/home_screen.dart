@@ -9,6 +9,9 @@ import '../services/storage_service.dart';
 import '../services/ratings_sync_service.dart';
 import 'knowledge_table_screen.dart';
 import 'profile_screen.dart';
+import '../models/game_session.dart';
+import 'game_setup_dialog.dart';
+import 'game_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final RatingsSyncService? syncService;
@@ -62,6 +65,24 @@ class _HomeScreenState extends State<HomeScreen> {
     if (settings.autoSync && settings.syncUrl.isNotEmpty) {
       await _sync.upload(settings.syncUrl);
     }
+  }
+
+  Future<void> _play() async {
+    final settings = await showDialog<GameSettings>(
+      context: context,
+      builder: (_) => GameSetupDialog(tables: _tables),
+    );
+    if (settings == null || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => GameScreen(
+          tables: List.of(_tables),
+          settings: settings,
+          onRatingsChanged: _ratingsChanged,
+        ),
+      ),
+    );
   }
 
   Future<void> _loadLocal() async {
@@ -194,61 +215,88 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: _starting
           ? const Center(child: CircularProgressIndicator())
-          : _tables.isEmpty
-          ? const Center(
-              child: Text(
-                'No tables saved yet.\nTap the refresh button to download.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey, fontSize: 15),
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: _tables.length,
-              itemBuilder: (context, index) {
-                final table = _tables[index];
-                final dataRowCount = max(0, table.rows.length - 1);
-                final isUpdating = _updatingTableNames.contains(table.name);
-                return Card(
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 4,
-                  ),
-                  child: ListTile(
-                    leading: const Icon(Icons.table_chart_outlined),
-                    title: Text(table.name),
-                    subtitle: Text(
-                      '$dataRowCount row${dataRowCount == 1 ? '' : 's'}',
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed:
+                          _tables.isEmpty ||
+                              _isRefreshing ||
+                              _updatingTableNames.isNotEmpty
+                          ? null
+                          : _play,
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text('Play'),
                     ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (isUpdating)
-                          const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        else
-                          IconButton(
-                            icon: const Icon(Icons.refresh),
-                            tooltip: 'Update this table',
-                            onPressed: () => _refreshSingleTable(table),
+                  ),
+                ),
+                Expanded(
+                  child: _tables.isEmpty
+                      ? const Center(
+                          child: Text(
+                            'No tables saved yet.\nTap the refresh button to download.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.grey, fontSize: 15),
                           ),
-                      ],
-                    ),
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => KnowledgeTableScreen(
-                          table: table,
-                          onRatingsChanged: _ratingsChanged,
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          itemCount: _tables.length,
+                          itemBuilder: (context, index) {
+                            final table = _tables[index];
+                            final dataRowCount = max(0, table.rows.length - 1);
+                            final isUpdating = _updatingTableNames.contains(
+                              table.name,
+                            );
+                            return Card(
+                              margin: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 4,
+                              ),
+                              child: ListTile(
+                                leading: const Icon(Icons.table_chart_outlined),
+                                title: Text(table.name),
+                                subtitle: Text(
+                                  '$dataRowCount row${dataRowCount == 1 ? '' : 's'}',
+                                ),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (isUpdating)
+                                      const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    else
+                                      IconButton(
+                                        icon: const Icon(Icons.refresh),
+                                        tooltip: 'Update this table',
+                                        onPressed: () =>
+                                            _refreshSingleTable(table),
+                                      ),
+                                  ],
+                                ),
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => KnowledgeTableScreen(
+                                      table: table,
+                                      onRatingsChanged: _ratingsChanged,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
                         ),
-                      ),
-                    ),
-                  ),
-                );
-              },
+                ),
+              ],
             ),
     );
   }

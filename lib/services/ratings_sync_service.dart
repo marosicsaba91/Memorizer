@@ -69,7 +69,7 @@ class RatingsSyncService {
       }
       if (decoded['version'] != 2) {
         throw const FormatException(
-          'Update and redeploy personal-sync.gs to use personal rating overrides.',
+          'Update and redeploy personal-sync.gs to use personal results overrides.',
         );
       }
       return decoded;
