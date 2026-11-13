@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 class KnowledgeTable {
+  final Map<String, int> importance;
   final String name;
   final String? sourceUrl;
   final double? textSize;
@@ -10,6 +11,7 @@ class KnowledgeTable {
 
   const KnowledgeTable({
     required this.name,
+    this.importance = const {},
     required this.rows,
     this.sourceUrl,
     this.textSize,
@@ -17,6 +19,7 @@ class KnowledgeTable {
 
   Map<String, dynamic> toJson() => {
     'name': name,
+    'importance': importance,
     'rows': rows,
     'sourceUrl': sourceUrl,
     if (textSize != null) 'textSize': textSize,
@@ -24,6 +27,7 @@ class KnowledgeTable {
 
   factory KnowledgeTable.fromJson(Map<String, dynamic> json) => KnowledgeTable(
     name: json['name'] as String,
+    importance: Map<String, int>.from(json['importance'] as Map? ?? {}),
     sourceUrl: json['sourceUrl'] as String?,
     textSize: (json['textSize'] as num?)?.toDouble(),
     rows: (json['rows'] as List)

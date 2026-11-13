@@ -13,6 +13,10 @@ const String kMainSheetUrl =
     'https://docs.google.com/spreadsheets/d/e/2PACX-1vQjnWRTHvXlPrQ32VgPR8qmVU0P-4gEIDmKQyTXxvGx_4hEHlOGOpcJs40xYg44xYeDrh7vnJoKi8Zv/pub?gid=0&single=true&output=csv';
 
 class SheetsService {
+  final http.Client? client;
+
+  SheetsService({this.client});
+
   // ------------------------------------------------------------------
   // Public API
   // ------------------------------------------------------------------
@@ -33,7 +37,23 @@ class SheetsService {
   Future<KnowledgeTable> fetchKnowledgeTable(KnowledgeEntry entry) async {
     final csvUrl = _toExportCsvUrl(entry.sheetUrl) ?? entry.sheetUrl;
     final rows = await _fetchCsv(csvUrl);
+    final limitedRows = rows.take(_findFirstEmptyRow(rows)).toList();
+    final separator = _findFirstEmptyColumn(limitedRows);
+    final importance = <String, int>{};
+    if (limitedRows.isNotEmpty) {
+      final headers = limitedRows.first;
+      for (var column = separator + 1; column < headers.length; column++) {
+        if (headers[column].trim().toLowerCase() != 'importance') continue;
+        for (final row in limitedRows.skip(1)) {
+          if (row.isEmpty) continue;
+          importance[row.first] =
+              (column < row.length ? int.tryParse(row[column].trim()) ?? 5 : 5)
+                  .clamp(1, 10);
+        }
+      }
+    }
     return KnowledgeTable(
+      importance: importance,
       name: entry.name,
       sourceUrl: entry.sheetUrl,
       rows: _trimTable(rows),
@@ -45,7 +65,8 @@ class SheetsService {
   // ------------------------------------------------------------------
 
   Future<List<List<String>>> _fetchCsv(String url) async {
-    final response = await http.get(Uri.parse(url));
+    final response =
+        await (client?.get(Uri.parse(url)) ?? http.get(Uri.parse(url)));
     if (response.statusCode != 200) {
       throw Exception('HTTP ${response.statusCode} when fetching $url');
     }

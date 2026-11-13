@@ -1,18 +1,21 @@
 class RowSaveData {
   final int rowOrder;
   final List<bool> revealed;
-  final int difficulty;
+  final int? success;
+  final int? importance;
 
   const RowSaveData({
     required this.rowOrder,
     required this.revealed,
-    required this.difficulty,
+    this.success,
+    this.importance,
   });
 
   Map<String, dynamic> toJson() => {
     'rowOrder': rowOrder,
     'revealed': revealed,
-    'difficulty': difficulty,
+    if (success != null) 'success': success,
+    if (importance != null) 'importance': importance,
   };
 
   factory RowSaveData.fromJson(Map<String, dynamic> json) {
@@ -21,8 +24,12 @@ class RowSaveData {
       revealed: (json['revealed'] as List? ?? const [])
           .map((e) => e == true)
           .toList(),
-      difficulty: (json['difficulty'] is int ? json['difficulty'] as int : 5)
-          .clamp(1, 10),
+      importance: (json['importance'] as int?)?.clamp(1, 10),
+      success:
+          ((json['success'] ?? json['difficulty']) is int
+                  ? (json['success'] ?? json['difficulty']) as int
+                  : null)
+              ?.clamp(1, 10),
     );
   }
 }

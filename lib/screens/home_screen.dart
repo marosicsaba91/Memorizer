@@ -1,15 +1,19 @@
 import 'dart:math';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../models/knowledge_entry.dart';
 import '../models/knowledge_table.dart';
 import '../services/sheets_service.dart';
 import '../services/storage_service.dart';
+import '../services/ratings_sync_service.dart';
 import 'knowledge_table_screen.dart';
+import 'profile_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final RatingsSyncService? syncService;
+
+  const HomeScreen({super.key, this.syncService});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -18,6 +22,8 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final _sheetsService = SheetsService();
   final _storageService = StorageService();
+  late final _sync = widget.syncService ?? RatingsSyncService();
+  bool _starting = true;
 
   List<KnowledgeTable> _tables = [];
   bool _isRefreshing = false;
@@ -26,7 +32,36 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _loadLocal();
+    _start();
+  }
+
+  Future<void> _start() async {
+    try {
+      await _loadLocal();
+      final settings = await _storageService.loadProfileSettings();
+      if (settings.autoSync && settings.syncUrl.isNotEmpty) {
+        await _sync.download(settings.syncUrl);
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Startup sync failed. Local data is available: $error',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
+
+  Future<void> _ratingsChanged() async {
+    final settings = await _storageService.loadProfileSettings();
+    if (settings.autoSync && settings.syncUrl.isNotEmpty) {
+      await _sync.upload(settings.syncUrl);
+    }
   }
 
   Future<void> _loadLocal() async {
@@ -127,6 +162,18 @@ class _HomeScreenState extends State<HomeScreen> {
         centerTitle: true,
         title: const Text('Memorizer'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.person_outline),
+            tooltip: 'Profile',
+            onPressed: _starting
+                ? null
+                : () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ProfileScreen(sync: _sync),
+                    ),
+                  ),
+          ),
           _isRefreshing
               ? const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 16),
@@ -141,11 +188,13 @@ class _HomeScreenState extends State<HomeScreen> {
               : IconButton(
                   icon: const Icon(Icons.refresh),
                   tooltip: 'Refresh tables',
-                  onPressed: _refresh,
+                  onPressed: _starting ? null : _refresh,
                 ),
         ],
       ),
-      body: _tables.isEmpty
+      body: _starting
+          ? const Center(child: CircularProgressIndicator())
+          : _tables.isEmpty
           ? const Center(
               child: Text(
                 'No tables saved yet.\nTap the refresh button to download.',
@@ -191,7 +240,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => KnowledgeTableScreen(table: table),
+                        builder: (_) => KnowledgeTableScreen(
+                          table: table,
+                          onRatingsChanged: _ratingsChanged,
+                        ),
                       ),
                     ),
                   ),

@@ -1,6 +1,6 @@
 import 'dart:math';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../models/knowledge_table.dart';
 import '../models/row_save_data.dart';
@@ -8,8 +8,13 @@ import '../services/storage_service.dart';
 
 class KnowledgeTableScreen extends StatefulWidget {
   final KnowledgeTable table;
+  final Future<void> Function()? onRatingsChanged;
 
-  const KnowledgeTableScreen({super.key, required this.table});
+  const KnowledgeTableScreen({
+    super.key,
+    required this.table,
+    this.onRatingsChanged,
+  });
 
   @override
   State<KnowledgeTableScreen> createState() => _KnowledgeTableScreenState();
@@ -43,13 +48,19 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
   int? _lastOpenedRowIdx;
   int? _lastOpenedOrigColIdx;
 
-  /// Per-row difficulty: 1–10, default 5.
-  late List<int> _difficulties;
+  /// Per-row success: 1–10, default 5.
+  late List<int> _successes;
+  late List<int> _importance;
+  late List<int?> _importanceOverrides;
+  late List<int?> _successOverrides;
+
+  int _defaultImportance(int index) =>
+      widget.table.importance[_rowKeyForIndex(index)] ?? 5;
 
   late double _textSize;
   bool _lastSortRandomise = false;
   String _lastSortSeed = '';
-  _DifficultyOrder _lastSortDifficultyOrder = _DifficultyOrder.ignore;
+  _SuccessOrder _lastSortSuccessOrder = _SuccessOrder.ignore;
 
   final _storageService = StorageService();
 
@@ -98,7 +109,8 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
 
   Future<void> _saveStudyState() async {
     final rowOrderByIndex = <int, int>{
-      for (var pos = 0; pos < _displayOrder.length; pos++) _displayOrder[pos]: pos,
+      for (var pos = 0; pos < _displayOrder.length; pos++)
+        _displayOrder[pos]: pos,
     };
 
     final rowData = <String, RowSaveData>{};
@@ -106,7 +118,8 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
       rowData[_rowKeyForIndex(origIdx)] = RowSaveData(
         rowOrder: rowOrderByIndex[origIdx] ?? origIdx,
         revealed: List<bool>.from(_revealed[origIdx], growable: false),
-        difficulty: _difficulties[origIdx].clamp(1, 10),
+        success: _successOverrides[origIdx],
+        importance: _importanceOverrides[origIdx],
       );
     }
 
@@ -159,7 +172,14 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
       growable: true,
     );
 
-    _difficulties = List.filled(_dataRows.length, 5, growable: true);
+    _successes = List<int>.filled(_dataRows.length, 5);
+    _importance = _dataRows
+        .map(
+          (row) => widget.table.importance[row.isEmpty ? '' : row.first] ?? 5,
+        )
+        .toList();
+    _importanceOverrides = List<int?>.filled(_dataRows.length, null);
+    _successOverrides = List<int?>.filled(_dataRows.length, null);
     _textSize = widget.table.textSize ?? 14.0;
     _loadTextSize();
     _loadInitialOrderingPreferences();
@@ -177,19 +197,22 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
   }
 
   Future<void> _loadSortSettings() async {
-    final saved = await _storageService.loadTableSortSettings(widget.table.name);
+    final saved = await _storageService.loadTableSortSettings(
+      widget.table.name,
+    );
     if (!mounted || saved == null) return;
 
     final randomise = saved['randomise'];
     final seed = saved['seed'];
-    final diffOrderIndex = saved['difficultyOrderIndex'];
+    final diffOrderIndex =
+        saved['successOrderIndex'] ?? saved['difficultyOrderIndex'];
 
     if (randomise is bool && seed is String && diffOrderIndex is int) {
-      if (diffOrderIndex >= 0 && diffOrderIndex < _DifficultyOrder.values.length) {
+      if (diffOrderIndex >= 0 && diffOrderIndex < _SuccessOrder.values.length) {
         setState(() {
           _lastSortRandomise = randomise;
           _lastSortSeed = seed;
-          _lastSortDifficultyOrder = _DifficultyOrder.values[diffOrderIndex];
+          _lastSortSuccessOrder = _SuccessOrder.values[diffOrderIndex];
         });
       }
     }
@@ -197,7 +220,7 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
 
   Future<void> _loadRowSaveData() async {
     final saved = await _storageService.loadTableRowData(widget.table.name);
-    if (!mounted || saved == null) return;
+    if (!mounted) return;
 
     final rowOrders = List<int>.generate(_dataRows.length, (i) => i);
     final revealed = List<List<bool>>.generate(
@@ -205,15 +228,20 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
       (_) => List<bool>.filled(_numCols, false, growable: false),
       growable: false,
     );
-    final difficulties = List<int>.filled(_dataRows.length, 5, growable: false);
+    final successes = List<int>.from(_successes);
+    final importance = List<int>.from(_importance);
 
     for (var origIdx = 0; origIdx < _dataRows.length; origIdx++) {
       final key = _rowKeyForIndex(origIdx);
-      final rowSaveData = saved[key];
+      final rowSaveData = saved?[key];
       if (rowSaveData == null) continue;
 
       rowOrders[origIdx] = rowSaveData.rowOrder;
-      difficulties[origIdx] = rowSaveData.difficulty.clamp(1, 10);
+      _successOverrides[origIdx] = rowSaveData.success;
+      _importanceOverrides[origIdx] = rowSaveData.importance;
+      successes[origIdx] = rowSaveData.success ?? 5;
+      importance[origIdx] =
+          rowSaveData.importance ?? _defaultImportance(origIdx);
 
       final rowRevealed = rowSaveData.revealed;
       for (var c = 0; c < _numCols; c++) {
@@ -221,11 +249,12 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
       }
     }
 
-    final order = List<int>.generate(_dataRows.length, (i) => i, growable: false)
-      ..sort((a, b) {
-        final cmp = rowOrders[a].compareTo(rowOrders[b]);
-        return cmp != 0 ? cmp : a.compareTo(b);
-      });
+    final order =
+        List<int>.generate(_dataRows.length, (i) => i, growable: false)
+          ..sort((a, b) {
+            final cmp = rowOrders[a].compareTo(rowOrders[b]);
+            return cmp != 0 ? cmp : a.compareTo(b);
+          });
 
     int? lastRow;
     int? lastCol;
@@ -239,84 +268,133 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
     }
 
     setState(() {
-      _difficulties = difficulties;
+      _successes = successes;
+      _importance = importance;
       _revealed = revealed;
       _displayOrder = List<int>.from(order, growable: true);
       _lastOpenedRowIdx = lastRow;
       _lastOpenedOrigColIdx = lastCol;
     });
+    await _saveStudyState();
   }
 
   Future<void> _saveSortSettings({
     required bool randomise,
     required String seed,
-    required _DifficultyOrder diffOrder,
+    required _SuccessOrder diffOrder,
   }) async {
     await _storageService.saveTableSortSettings(
       widget.table.name,
       randomise: randomise,
       seed: seed,
-      difficultyOrderIndex: diffOrder.index,
+      successOrderIndex: diffOrder.index,
     );
   }
 
-  Future<void> _saveDifficulty(int origRowIdx, int value) async {
-    setState(() => _difficulties[origRowIdx] = value.clamp(1, 10));
-    await _saveStudyState();
-  }
-
-  // ── heatmap ────────────────────────────────────────────────────
-
-  /// Returns a row background color based on difficulty (1–10).
-  /// 5 → white, <5 → cold (blue), >5 → warm (red).
-  Color _difficultyColor(int difficulty) => switch (difficulty) {
-    1 || _ when difficulty <= 1 => const Color.fromARGB(255, 72, 172, 122),
-    2 => const Color.fromARGB(255, 117, 201, 128),
-    3 => const Color.fromARGB(255, 185, 240, 159),
-    4 => const Color.fromARGB(255, 235, 255, 204),
+  /// Returns a row background color based on success (1–10).
+  /// Higher success values are green; lower values are red.
+  Color _successColor(int success) => switch (success) {
+    <= 1 => const Color.fromARGB(255, 248, 108, 108),
+    2 => const Color.fromARGB(255, 250, 147, 129),
+    3 => const Color.fromARGB(255, 255, 177, 146),
+    4 => const Color.fromARGB(255, 255, 222, 180),
     5 => const Color.fromARGB(255, 255, 255, 255),
-    6 => const Color.fromARGB(255, 255, 247, 204),
-    7 => const Color.fromARGB(255, 255, 222, 180),
-    8 => const Color.fromARGB(255, 255, 177, 146),
-    9 => const Color.fromARGB(255, 250, 147, 129),
-    _ => const Color.fromARGB(255, 248, 108, 108),
+    6 => const Color.fromARGB(255, 235, 255, 204),
+    7 => const Color.fromARGB(255, 185, 240, 159),
+    8 => const Color.fromARGB(255, 117, 201, 128),
+    9 => const Color.fromARGB(255, 88, 185, 129),
+    _ => const Color.fromARGB(255, 72, 172, 122),
   };
 
-  void _showDifficultyDialog(int origRowIdx) {
+  void _showSuccessDialog(int origRowIdx) {
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
-          final d = _difficulties[origRowIdx];
+          Widget ratingControl(
+            String label,
+            List<int> values,
+            List<int?> overrides,
+            int defaultValue,
+          ) {
+            final value = values[origRowIdx];
+            Future<void> update(int? delta) async {
+              setState(() {
+                overrides[origRowIdx] = delta == null
+                    ? null
+                    : (value + delta).clamp(1, 10);
+                values[origRowIdx] = overrides[origRowIdx] ?? defaultValue;
+              });
+              setDialogState(() {});
+              await _saveStudyState();
+              try {
+                await widget.onRatingsChanged?.call();
+              } catch (error) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(this.context).showSnackBar(
+                  SnackBar(
+                    content: Text('Saved locally. Autosync failed: $error'),
+                  ),
+                );
+              }
+            }
+
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(label),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      tooltip: 'Decrease $label',
+                      onPressed: value > 1 ? () => update(-1) : null,
+                      icon: const Icon(Icons.remove),
+                    ),
+                    SizedBox(
+                      width: 64,
+                      child: Text(
+                        '$value',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 32),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Increase $label',
+                      onPressed: value < 10 ? () => update(1) : null,
+                      icon: const Icon(Icons.add),
+                    ),
+                  ],
+                ),
+                TextButton(
+                  onPressed: overrides[origRowIdx] == null
+                      ? null
+                      : () => update(null),
+                  child: Text('Reset to: $defaultValue'),
+                ),
+              ],
+            );
+          }
+
           return AlertDialog(
-            title: const Text('Difficulty', textAlign: TextAlign.center),
-            content: Text(
-              d.toString(),
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold),
+            title: const Text('Entry ratings', textAlign: TextAlign.center),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ratingControl(
+                  'Importance',
+                  _importance,
+                  _importanceOverrides,
+                  _defaultImportance(origRowIdx),
+                ),
+                const SizedBox(height: 16),
+                ratingControl('Success', _successes, _successOverrides, 5),
+              ],
             ),
             actions: [
               FilledButton(
-                onPressed: () {
-                  if (d > 1) {
-                    _saveDifficulty(origRowIdx, d - 1);
-                    setDialogState(() {});
-                  }
-                },
-                child: const Text('-1'),
-              ),
-              FilledButton(
                 onPressed: () => Navigator.pop(context),
                 child: const Text('Close'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  if (d < 10) {
-                    _saveDifficulty(origRowIdx, d + 1);
-                    setDialogState(() {});
-                  }
-                },
-                child: const Text('+1'),
               ),
             ],
           );
@@ -385,7 +463,10 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
     return hash;
   }
 
-  void _randomise({String? seed, _DifficultyOrder diffOrder = _DifficultyOrder.ignore}) {
+  void _randomise({
+    String? seed,
+    _SuccessOrder diffOrder = _SuccessOrder.ignore,
+  }) {
     final normalizedSeed = seed?.trim() ?? '';
     final random = normalizedSeed.isEmpty
         ? Random()
@@ -395,10 +476,12 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
       // Start from canonical order so the same seed always yields the same result.
       _displayOrder = List.generate(_dataRows.length, (i) => i, growable: true);
       _displayOrder.shuffle(random);
-      if (diffOrder != _DifficultyOrder.ignore) {
-        _displayOrder.sort((a, b) => diffOrder == _DifficultyOrder.easierFirst
-            ? _difficulties[a].compareTo(_difficulties[b])
-            : _difficulties[b].compareTo(_difficulties[a]));
+      if (diffOrder != _SuccessOrder.ignore) {
+        _displayOrder.sort(
+          (a, b) => diffOrder == _SuccessOrder.lowerFirst
+              ? _successes[a].compareTo(_successes[b])
+              : _successes[b].compareTo(_successes[a]),
+        );
       }
     });
     _saveStudyState();
@@ -407,7 +490,7 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
   void _showReorderDialog() {
     final seedController = TextEditingController(text: _lastSortSeed);
     var doRandomise = _lastSortRandomise;
-    var diffOrder = _lastSortDifficultyOrder;
+    var diffOrder = _lastSortSuccessOrder;
 
     showDialog(
       context: context,
@@ -473,19 +556,16 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                   ],
                 );
 
-          final difficultyControls = SegmentedButton<_DifficultyOrder>(
+          final successControls = SegmentedButton<_SuccessOrder>(
             segments: const [
+              ButtonSegment(value: _SuccessOrder.ignore, label: Text('Ignore')),
               ButtonSegment(
-                value: _DifficultyOrder.ignore,
-                label: Text('Ignore'),
+                value: _SuccessOrder.lowerFirst,
+                label: Text('Low First'),
               ),
               ButtonSegment(
-                value: _DifficultyOrder.easierFirst,
-                label: Text('Easy First'),
-              ),
-              ButtonSegment(
-                value: _DifficultyOrder.harderFirst,
-                label: Text('Hard First'),
+                value: _SuccessOrder.higherFirst,
+                label: Text('High First'),
               ),
             ],
             selected: {diffOrder},
@@ -507,15 +587,15 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      const Text('Difficulty'),
+                      const Text('Success'),
                       const SizedBox(width: 12),
-                      Expanded(child: difficultyControls),
+                      Expanded(child: successControls),
                     ],
                   )
                 else ...[
-                  const Text('Difficulty'),
+                  const Text('Success'),
                   const SizedBox(height: 4),
-                  difficultyControls,
+                  successControls,
                 ],
               ],
             ),
@@ -530,7 +610,7 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                   setState(() {
                     _lastSortRandomise = doRandomise;
                     _lastSortSeed = seed;
-                    _lastSortDifficultyOrder = diffOrder;
+                    _lastSortSuccessOrder = diffOrder;
                   });
                   Navigator.pop(context);
                   await _saveSortSettings(
@@ -553,13 +633,15 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
     );
   }
 
-  void _reorder({_DifficultyOrder diffOrder = _DifficultyOrder.ignore}) {
+  void _reorder({_SuccessOrder diffOrder = _SuccessOrder.ignore}) {
     setState(() {
       _displayOrder = List.generate(_dataRows.length, (i) => i, growable: true);
-      if (diffOrder != _DifficultyOrder.ignore) {
-        _displayOrder.sort((a, b) => diffOrder == _DifficultyOrder.easierFirst
-            ? _difficulties[a].compareTo(_difficulties[b])
-            : _difficulties[b].compareTo(_difficulties[a]));
+      if (diffOrder != _SuccessOrder.ignore) {
+        _displayOrder.sort(
+          (a, b) => diffOrder == _SuccessOrder.lowerFirst
+              ? _successes[a].compareTo(_successes[b])
+              : _successes[b].compareTo(_successes[a]),
+        );
       }
     });
     _saveStudyState();
@@ -632,8 +714,7 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                       onChanged: (v) {
                         setDialogState(() => _textSize = v);
                         setState(() {});
-                        _storageService.saveTableTextSize(
-                            widget.table.name, v);
+                        _storageService.saveTableTextSize(widget.table.name, v);
                       },
                     ),
                   ),
@@ -701,17 +782,15 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                           ),
                           children: _displayOrder.map((origIdx) {
                             final row = _dataRows[origIdx];
-                            final rowColor = _difficultyColor(
-                              _difficulties[origIdx],
-                            );
+                            final rowColor = _successColor(_successes[origIdx]);
                             return TableRow(
                               key: ValueKey(origIdx),
                               decoration: BoxDecoration(color: rowColor),
                               children: [
-                                // Index — tap to open difficulty dialog
+                                // Index — tap to open success dialog
                                 GestureDetector(
                                   behavior: HitTestBehavior.opaque,
-                                  onTap: () => _showDifficultyDialog(origIdx),
+                                  onTap: () => _showSuccessDialog(origIdx),
                                   child: SizedBox(
                                     width: double.infinity,
                                     child: Container(
@@ -968,7 +1047,10 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                     child: revealed
                         ? Text(
                             text,
-                            style: TextStyle(color: Colors.black, fontSize: _textSize),
+                            style: TextStyle(
+                              color: Colors.black,
+                              fontSize: _textSize,
+                            ),
                           )
                         : Center(
                             child: Text(
@@ -1016,4 +1098,4 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
 
 enum _FooterMenuAction { settings, reorder, hideAll, showAll }
 
-enum _DifficultyOrder { ignore, easierFirst, harderFirst }
+enum _SuccessOrder { ignore, lowerFirst, higherFirst }
