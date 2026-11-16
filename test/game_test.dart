@@ -76,6 +76,38 @@ void main() {
     expect(shorter.answered, 1);
   });
 
+  test(
+    'history navigation preserves the next question and scores each visit once',
+    () {
+      for (final count in <int?>[3, null]) {
+        final game = GameSession(
+          entries: GameEntry.fromTable(words, {}),
+          settings: GameSettings(questionCount: count),
+          random: Random(7),
+        );
+        final first = game.current;
+        expect(game.canGoBack, isFalse);
+        expect(game.canGoForward, isFalse);
+        game.answer(GameAnswer.knew);
+        final second = game.current;
+        game.goBack();
+        expect(game.current, same(first));
+        expect(game.questionNumber, 1);
+        expect(game.isReviewing, isTrue);
+        game.answer(GameAnswer.failed);
+        expect(game.answered, 1);
+        expect(game.results[GameAnswer.failed], 0);
+        game.goForward();
+        expect(game.current, same(second));
+        expect(game.questionNumber, 2);
+        expect(game.isReviewing, isFalse);
+        expect(game.canGoForward, isFalse);
+        game.goForward();
+        expect(game.current, same(second));
+      }
+    },
+  );
+
   testWidgets(
     'game setup automatically remembers choices across dialog openings',
     (tester) async {
@@ -574,6 +606,19 @@ void main() {
       await tester.pumpAndSettle();
       final second = current();
       expect(second, isNot(first));
+      expect(find.text('answer $second'), findsNothing);
+      await tester.tap(find.text(second));
+      await tester.pumpAndSettle();
+      expect(find.text(second), findsNothing);
+      await tester.tap(find.text('Previous'));
+      await tester.pumpAndSettle();
+      expect(find.text('Question 1 / 3'), findsOneWidget);
+      expect(find.text('answer $first'), findsOneWidget);
+      expect(find.text('Failed'), findsNothing);
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+      expect(find.text('Question 2 / 3'), findsOneWidget);
+      expect(find.text(second), findsNothing);
       expect(find.text('answer $second'), findsNothing);
       await tester.tap(find.text('Show Answer'));
       await tester.pumpAndSettle();

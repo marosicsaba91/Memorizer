@@ -124,7 +124,24 @@ class GameSession {
   final Map<GameAnswer, int> results = {
     for (final answer in GameAnswer.values) answer: 0,
   };
-  GameEntry? current;
+  final List<GameEntry> _history = [];
+  int _position = 0;
+  bool _completed = false;
+
+  GameEntry? get current =>
+      _completed || _history.isEmpty ? null : _history[_position];
+  int get questionNumber => _position + 1;
+  bool get isReviewing => _position < answered;
+  bool get canGoBack => !finished && _position > 0;
+  bool get canGoForward => !finished && _position < _history.length - 1;
+
+  void goBack() {
+    if (canGoBack) _position--;
+  }
+
+  void goForward() {
+    if (canGoForward) _position++;
+  }
 
   GameSession({required this.entries, required this.settings, Random? random})
     : random = random ?? Random() {
@@ -141,10 +158,10 @@ class GameSession {
   bool get finished => current == null;
 
   void answer(GameAnswer answer) {
-    if (finished) return;
+    if (finished || isReviewing) return;
     results[answer] = results[answer]! + 1;
     if (total != null && answered >= total!) {
-      current = null;
+      _completed = true;
     } else {
       _next();
     }
@@ -166,6 +183,7 @@ class GameSession {
     } else {
       index = random.nextInt(_remaining.length);
     }
-    current = _remaining.removeAt(index);
+    _history.add(_remaining.removeAt(index));
+    _position = _history.length - 1;
   }
 }

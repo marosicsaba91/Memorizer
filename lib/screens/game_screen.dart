@@ -31,6 +31,7 @@ class _GameScreenState extends State<GameScreen> {
   final _scroll = ScrollController();
   GameSession? _session;
   List<bool> _revealed = [];
+  final Map<int, List<bool>> _questionReveals = {};
   bool _loading = true;
   bool _saving = false;
   bool _allowPop = false;
@@ -60,6 +61,7 @@ class _GameScreenState extends State<GameScreen> {
       }
       if (!mounted) return;
       setState(() {
+        _questionReveals.clear();
         _session = GameSession(
           entries: entries,
           settings: widget.settings,
@@ -76,11 +78,26 @@ class _GameScreenState extends State<GameScreen> {
 
   void _prepareQuestion() {
     final entry = _session?.current;
-    _revealed = List.generate(
-      entry?.cells.length ?? 0,
-      (index) => index + 1 == widget.settings.autoOpenColumn,
+    _revealed = _questionReveals.putIfAbsent(
+      _session!.questionNumber,
+      () => List.generate(
+        entry?.cells.length ?? 0,
+        (index) => index + 1 == widget.settings.autoOpenColumn,
+      ),
     );
     if (_scroll.hasClients) _scroll.jumpTo(0);
+  }
+
+  void _navigateQuestion({required bool forward}) {
+    if (_saving) return;
+    setState(() {
+      if (forward) {
+        _session!.goForward();
+      } else {
+        _session!.goBack();
+      }
+      _prepareQuestion();
+    });
   }
 
   Future<void> _persist(GameEntry entry) async {
@@ -129,7 +146,11 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   Future<void> _answer(GameAnswer answer) async {
-    if (_saving || !_revealed.every((value) => value)) return;
+    if (_saving ||
+        _session!.isReviewing ||
+        !_revealed.every((value) => value)) {
+      return;
+    }
     final entry = _session!.current!;
     final previous = entry.personalSuccess;
     setState(() => _saving = true);
@@ -349,7 +370,7 @@ class _GameScreenState extends State<GameScreen> {
           ),
           title: Text(
             playing
-                ? 'Question ${session!.answered + 1}${session.total == null ? '' : ' / ${session.total}'}'
+                ? 'Question ${session!.questionNumber}${session.total == null ? '' : ' / ${session.total}'}'
                 : 'Play',
           ),
         ),
@@ -380,6 +401,26 @@ class _GameScreenState extends State<GameScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (playing)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      TextButton.icon(
+                        onPressed: !_saving && session!.canGoBack
+                            ? () => _navigateQuestion(forward: false)
+                            : null,
+                        icon: const Icon(Icons.chevron_left),
+                        label: const Text('Previous'),
+                      ),
+                      TextButton.icon(
+                        onPressed: !_saving && session!.canGoForward
+                            ? () => _navigateQuestion(forward: true)
+                            : null,
+                        icon: const Icon(Icons.chevron_right),
+                        label: const Text('Next'),
+                      ),
+                    ],
+                  ),
+                if (playing)
                   if (!_revealed.every((value) => value))
                     SizedBox(
                       width: double.infinity,
@@ -387,7 +428,8 @@ class _GameScreenState extends State<GameScreen> {
                         onPressed: _saving
                             ? null
                             : () => setState(
-                                () => _revealed = List.filled(
+                                () => _revealed.fillRange(
+                                  0,
                                   _revealed.length,
                                   true,
                                 ),
@@ -395,7 +437,7 @@ class _GameScreenState extends State<GameScreen> {
                         child: const Text('Show Answer'),
                       ),
                     )
-                  else
+                  else if (!session!.isReviewing)
                     Row(
                       children: [
                         Expanded(
