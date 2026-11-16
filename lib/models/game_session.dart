@@ -10,6 +10,7 @@ class GameSettings {
   final bool weighted;
   final int importanceWeight;
   final int lowSuccessWeight;
+  final int lowAppearanceWeight;
   final int autoOpenColumn;
 
   const GameSettings({
@@ -19,8 +20,10 @@ class GameSettings {
     this.importanceWeight = 1,
     this.lowSuccessWeight = 2,
     this.autoOpenColumn = 1,
-  }) : assert(importanceWeight >= 0 && importanceWeight <= 10),
-       assert(lowSuccessWeight >= 0 && lowSuccessWeight <= 10);
+    this.lowAppearanceWeight = 0,
+  }) : assert(importanceWeight >= 0 && importanceWeight <= 100),
+       assert(lowAppearanceWeight >= 0 && lowAppearanceWeight <= 100),
+       assert(lowSuccessWeight >= 0 && lowSuccessWeight <= 100);
 
   Map<String, dynamic> toJson() => {
     'questionCount': questionCount,
@@ -29,6 +32,7 @@ class GameSettings {
     'importanceWeight': importanceWeight,
     'lowSuccessWeight': lowSuccessWeight,
     'autoOpenColumn': autoOpenColumn,
+    'lowAppearanceWeight': lowAppearanceWeight,
   };
 
   factory GameSettings.fromJson(Map<String, dynamic> json) => GameSettings(
@@ -42,14 +46,17 @@ class GameSettings {
         ? (json['selectedTables'] as List).whereType<String>().toSet()
         : null,
     weighted: json['weighted'] == true,
+    lowAppearanceWeight: json['lowAppearanceWeight'] is int
+        ? (json['lowAppearanceWeight'] as int).clamp(0, 100)
+        : 0,
     autoOpenColumn: json['autoOpenColumn'] is int
         ? json['autoOpenColumn'] as int
         : 1,
     importanceWeight: json['importanceWeight'] is int
-        ? (json['importanceWeight'] as int).clamp(0, 10)
+        ? (json['importanceWeight'] as int).clamp(0, 100)
         : 1,
     lowSuccessWeight: json['lowSuccessWeight'] is int
-        ? (json['lowSuccessWeight'] as int).clamp(0, 10)
+        ? (json['lowSuccessWeight'] as int).clamp(0, 100)
         : 2,
   );
 }
@@ -62,6 +69,7 @@ class GameEntry {
   final List<String> headers;
   int? personalImportance;
   int? personalSuccess;
+  int appeared;
 
   GameEntry({
     required this.table,
@@ -69,14 +77,12 @@ class GameEntry {
     required this.headers,
     this.personalImportance,
     this.personalSuccess,
+    this.appeared = 0,
   });
 
   String get key => cells.first;
   int get importance => personalImportance ?? table.importance[key] ?? 5;
   int get success => personalSuccess ?? 5;
-  int weight(GameSettings settings) =>
-      importance * settings.importanceWeight +
-      (11 - success) * settings.lowSuccessWeight;
 
   static List<GameEntry> fromTable(
     KnowledgeTable table,
@@ -110,6 +116,7 @@ class GameEntry {
             headers: headers,
             personalImportance: saved[row.first]?.importance,
             personalSuccess: saved[row.first]?.success,
+            appeared: saved[row.first]?.appeared ?? 0,
           ),
         )
         .toList();
@@ -121,6 +128,22 @@ class GameSession {
   final GameSettings settings;
   final Random random;
   final List<GameEntry> _remaining = [];
+  final Set<(String, String)> _shown = {};
+
+  double selectionWeight(GameEntry entry) {
+    final minimum = entries.map((e) => e.appeared).reduce(min);
+    final maximum = entries.map((e) => e.appeared).reduce(max);
+    final normalized = maximum == minimum
+        ? 0.0
+        : (entry.appeared - minimum) / (maximum - minimum);
+    return max(
+      1.0,
+          entry.importance * settings.importanceWeight +
+          (11 - entry.success) * settings.lowSuccessWeight +
+          (1 - normalized) * 10 * settings.lowAppearanceWeight,
+    );
+  }
+
   final Map<GameAnswer, int> results = {
     for (final answer in GameAnswer.values) answer: 0,
   };
@@ -196,13 +219,14 @@ class GameSession {
     if (settings.questionCount == null) _remaining.clear();
     if (_remaining.isEmpty) _remaining.addAll(entries);
     var index = 0;
-    if (settings.weighted &&
-        (settings.importanceWeight > 0 || settings.lowSuccessWeight > 0)) {
-      var ticket = random.nextInt(
-        _remaining.fold<int>(0, (sum, entry) => sum + entry.weight(settings)),
-      );
+    final weights = settings.weighted
+        ? _remaining.map(selectionWeight).toList()
+        : <double>[];
+    final sum = weights.fold<double>(0, (sum, weight) => sum + weight);
+    if (sum > 0) {
+      var ticket = random.nextDouble() * sum;
       for (; index < _remaining.length - 1; index++) {
-        ticket -= _remaining[index].weight(settings);
+        ticket -= weights[index];
         if (ticket < 0) break;
       }
     } else {
@@ -211,6 +235,7 @@ class GameSession {
     _history.add(_remaining.removeAt(index));
     _answers.add(null);
     final entry = _history.last;
+    if (_shown.add((entry.table.name, entry.key))) entry.appeared++;
     _initialSuccess.putIfAbsent(entry, () => entry.personalSuccess);
     _position = _history.length - 1;
   }

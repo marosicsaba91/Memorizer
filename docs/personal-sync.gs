@@ -1,7 +1,7 @@
 // Paste this into Extensions > Apps Script in your personal spreadsheet.
 const SPREADSHEET_ID = 'PASTE_YOUR_SPREADSHEET_ID_HERE';
 const TAB_NAME = 'Ratings';
-const HEADERS = ['Table', 'Entry', 'Importance', 'Success'];
+const HEADERS = ['Table', 'Entry', 'Importance', 'Success', 'Appered'];
 
 function jsonResponse(value) {
   return ContentService.createTextOutput(JSON.stringify(value))
@@ -23,6 +23,10 @@ function ratingsSheet() {
   } else {
     const actual = sheet.getRange(1, 1, 1, HEADERS.length)
       .getDisplayValues()[0];
+    if (actual[4] === '' && HEADERS.slice(0, 4).every((header, index) => actual[index] === header)) {
+      sheet.getRange(1, 5, 1, 1).setValues([['Appered']]);
+      actual[4] = 'Appered';
+    }
     if (!HEADERS.every((header, index) => actual[index] === header)) {
       throw new Error('The existing Ratings tab has unexpected headers. ' +
         'Rename that tab so a new Ratings tab can be created automatically.');
@@ -40,16 +44,23 @@ function rating(value) {
   return number;
 }
 
+function appearanceCount(value) {
+  if (value === '' || value === undefined || value === null) return 0;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 0) throw new Error('Appered must be a nonnegative integer.');
+  return number;
+}
+
 function readEntries(sheet) {
   if (sheet.getLastRow() < 2) return [];
-  return sheet.getRange(2, 1, sheet.getLastRow() - 1, 4)
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, 5)
     .getDisplayValues()
     .filter(row => row[0] !== '' && row[1] !== '')
     .map(row => ({
       table: row[0], entry: row[1],
-      importance: rating(row[2]), success: rating(row[3]),
+      importance: rating(row[2]), success: rating(row[3]), appeared: appearanceCount(row[4]),
     }))
-    .filter(item => item.importance != null || item.success != null);
+    .filter(item => item.importance != null || item.success != null || item.appeared > 0);
 }
 
 function doGet() {
@@ -82,7 +93,7 @@ function doPost(event) {
         throw new Error('Each entry needs nonempty table and entry strings.');
       }
       return {table: item.table, entry: item.entry,
-        importance: rating(item.importance), success: rating(item.success)};
+        importance: rating(item.importance), success: rating(item.success), appeared: appearanceCount(item.appeared)};
     });
     lock.waitLock(30000);
     locked = true;
@@ -90,21 +101,21 @@ function doPost(event) {
     const key = item => JSON.stringify([item.table, item.entry]);
     const merged = new Map();
     incoming.forEach(item => {
-      if (item.importance != null || item.success != null) merged.set(key(item), item);
+      if (item.importance != null || item.success != null || item.appeared > 0) merged.set(key(item), item);
     });
     // The leading apostrophe keeps text literal, including entries starting '='.
     const literal = text => "'" + text;
     const rows = [HEADERS,
       ...Array.from(merged.values(), item => [
-        literal(item.table), literal(item.entry), item.importance ?? '', item.success ?? '',
+        literal(item.table), literal(item.entry), item.importance ?? '', item.success ?? '', item.appeared || '',
       ])];
     if (sheet.getMaxRows() < rows.length) {
       sheet.insertRowsAfter(sheet.getMaxRows(), rows.length - sheet.getMaxRows());
     }
-    sheet.getRange(1, 1, rows.length, 4).setValues(rows);
+    sheet.getRange(1, 1, rows.length, 5).setValues(rows);
     const oldLastRow = sheet.getLastRow();
     if (oldLastRow > rows.length) {
-      sheet.getRange(rows.length + 1, 1, oldLastRow - rows.length, 4)
+      sheet.getRange(rows.length + 1, 1, oldLastRow - rows.length, 5)
         .clearContent();
     }
     SpreadsheetApp.flush();

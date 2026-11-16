@@ -78,6 +78,13 @@ class RatingsSyncService {
     }
   }
 
+  static int appearanceCount(dynamic value) {
+    if (value == null || value == '') return 0;
+    if (value is! int || value < 0)
+      throw const FormatException('Appered must be a nonnegative integer.');
+    return value;
+  }
+
   Future<int> download(String url) => _enqueue(() async {
     final data = await _request(url);
     if (data['version'] != 2 || data['entries'] is! List) {
@@ -110,6 +117,7 @@ class RatingsSyncService {
         revealed: const [],
         importance: rating('importance'),
         success: rating('success'),
+        appeared: appearanceCount(item['appeared']),
       );
     }
     await storage.replacePersonalResults(updates);
@@ -118,7 +126,12 @@ class RatingsSyncService {
       (count, rows) =>
           count +
           rows.values
-              .where((row) => row.importance != null || row.success != null)
+              .where(
+                (row) =>
+                    row.importance != null ||
+                    row.success != null ||
+                    row.appeared > 0,
+              )
               .length,
     );
   });
@@ -133,13 +146,16 @@ class RatingsSyncService {
     for (final table in (await storage.loadPersonalResults()).entries) {
       for (final row in table.value.entries) {
         if (row.key.trim().isEmpty ||
-            (row.value.importance == null && row.value.success == null))
+            (row.value.importance == null &&
+                row.value.success == null &&
+                row.value.appeared == 0))
           continue;
         entries.add({
           'table': table.key,
           'entry': row.key,
           'importance': row.value.importance,
           'success': row.value.success,
+          if (row.value.appeared > 0) 'appeared': row.value.appeared,
         });
       }
     }

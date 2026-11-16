@@ -32,6 +32,7 @@ class _GameScreenState extends State<GameScreen> {
   GameSession? _session;
   List<bool> _revealed = [];
   final Map<int, List<bool>> _questionReveals = {};
+  final Set<(String, String)> _persistedAppearances = {};
   bool _loading = true;
   bool _saving = false;
   bool _allowPop = false;
@@ -62,6 +63,7 @@ class _GameScreenState extends State<GameScreen> {
       if (!mounted) return;
       setState(() {
         _questionReveals.clear();
+        _persistedAppearances.clear();
         _session = GameSession(
           entries: entries,
           settings: widget.settings,
@@ -69,6 +71,7 @@ class _GameScreenState extends State<GameScreen> {
         );
         _prepareQuestion();
       });
+      await _persistShown();
     } catch (error) {
       if (mounted) setState(() => _error = 'Could not start game: $error');
     } finally {
@@ -100,6 +103,16 @@ class _GameScreenState extends State<GameScreen> {
     });
   }
 
+  Future<void> _persistShown() async {
+    final entry = _session?.current;
+    if (entry == null ||
+        _persistedAppearances.contains((entry.table.name, entry.key)))
+      return;
+    await _persist(entry);
+    _persistedAppearances.add((entry.table.name, entry.key));
+    unawaited(_notifyChanged());
+  }
+
   Future<void> _persist(GameEntry entry) async {
     final saved = await _storage.ensureTableRowData(entry.table);
     final previous = saved[entry.key];
@@ -108,6 +121,7 @@ class _GameScreenState extends State<GameScreen> {
       revealed: previous?.revealed ?? const [],
       importance: entry.personalImportance,
       success: entry.personalSuccess,
+      appeared: entry.appeared,
     );
     await _storage.saveTableRowData(entry.table.name, saved);
   }
@@ -164,6 +178,7 @@ class _GameScreenState extends State<GameScreen> {
         _session!.answer(answer);
         _prepareQuestion();
       });
+      await _persistShown();
     } catch (error) {
       entry.personalSuccess = previous;
       if (mounted)

@@ -341,11 +341,14 @@ class StorageService {
     final prefs = await SharedPreferences.getInstance();
     final personal = <String, dynamic>{
       for (final row in rows.entries)
-        if (row.value.importance != null || row.value.success != null)
+        if (row.value.importance != null ||
+            row.value.success != null ||
+            row.value.appeared > 0)
           row.key: {
             if (row.value.importance != null)
               'importance': row.value.importance,
             if (row.value.success != null) 'success': row.value.success,
+            if (row.value.appeared > 0) 'appeared': row.value.appeared,
           },
     };
     if (personal.isEmpty) {
@@ -417,6 +420,7 @@ class StorageService {
         revealed: study?.revealed ?? const [],
         importance: row.value.importance,
         success: row.value.success,
+        appeared: row.value.appeared,
       );
     }
     return result;

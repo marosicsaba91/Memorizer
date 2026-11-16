@@ -50,6 +50,7 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
 
   /// Per-row success: 1–10, default 5.
   late List<int> _successes;
+  late List<int> _appeared;
   late List<int> _importance;
   late List<int?> _importanceOverrides;
   late List<int?> _successOverrides;
@@ -119,6 +120,7 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
         rowOrder: rowOrderByIndex[origIdx] ?? origIdx,
         revealed: List<bool>.from(_revealed[origIdx], growable: false),
         success: _successOverrides[origIdx],
+        appeared: _appeared[origIdx],
         importance: _importanceOverrides[origIdx],
       );
     }
@@ -172,6 +174,7 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
       growable: true,
     );
 
+    _appeared = List<int>.filled(_dataRows.length, 0);
     _successes = List<int>.filled(_dataRows.length, 5);
     _importance = _dataRows
         .map(
@@ -237,6 +240,7 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
       if (rowSaveData == null) continue;
 
       rowOrders[origIdx] = rowSaveData.rowOrder;
+      _appeared[origIdx] = rowSaveData.appeared;
       _successOverrides[origIdx] = rowSaveData.success;
       _importanceOverrides[origIdx] = rowSaveData.importance;
       successes[origIdx] = rowSaveData.success ?? 5;
@@ -389,6 +393,7 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                 ),
                 const SizedBox(height: 16),
                 ratingControl('Success', _successes, _successOverrides, 5),
+                Text('Appered: ${_appeared[origRowIdx]}'),
               ],
             ),
             actions: [

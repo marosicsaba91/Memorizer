@@ -24,6 +24,7 @@ class _GameSetupDialogState extends State<GameSetupDialog> {
   bool get _validCount => _count != null && _count! >= 1;
   int _importanceWeight = 1;
   int _lowSuccessWeight = 2;
+  int _lowAppearanceWeight = 0;
   bool _allTables = true;
   bool _weighted = false;
   final Set<String> _selected = {};
@@ -55,6 +56,7 @@ class _GameSetupDialogState extends State<GameSetupDialog> {
       _weighted = settings.weighted;
       _importanceWeight = settings.importanceWeight;
       _lowSuccessWeight = settings.lowSuccessWeight;
+      _lowAppearanceWeight = settings.lowAppearanceWeight;
       _autoOpenController.text = settings.autoOpenColumn.toString();
     }
     setState(() => _loading = false);
@@ -66,6 +68,7 @@ class _GameSetupDialogState extends State<GameSetupDialog> {
     weighted: _weighted,
     importanceWeight: _importanceWeight,
     lowSuccessWeight: _lowSuccessWeight,
+    lowAppearanceWeight: _lowAppearanceWeight,
     autoOpenColumn: _autoOpenColumn ?? 0,
   );
 
@@ -114,16 +117,19 @@ class _GameSetupDialogState extends State<GameSetupDialog> {
             children: [
               Expanded(
                 child: Slider(
-                  value: value.toDouble(),
+                  // The midpoint represents 10; the upper half spans 10?100.
+                  value: value <= 10 ? value.toDouble() : 10 + (value - 10) / 9,
                   min: 0,
-                  max: 10,
-                  divisions: 10,
+                  max: 20,
                   label: '$value',
-                  onChanged: (value) => onChanged(value.round()),
+                  onChanged: (position) => onChanged(
+                    (position <= 10 ? position : 10 + (position - 10) * 9)
+                        .round(),
+                  ),
                 ),
               ),
               SizedBox(
-                width: 28,
+                width: 40,
                 child: Text('$value', textAlign: TextAlign.center),
               ),
             ],
@@ -136,171 +142,225 @@ class _GameSetupDialogState extends State<GameSetupDialog> {
     title: const Text('Set up game'),
     content: SizedBox(
       width: 420,
+      height: MediaQuery.sizeOf(context).height,
       child: _loading
           ? const SizedBox(
               height: 80,
               child: Center(child: CircularProgressIndicator()),
             )
-          : SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Question count'),
-                  const SizedBox(height: 8),
-                  SegmentedButton<bool>(
-                    segments: const [
-                      ButtonSegment(value: false, label: Text('Finite')),
-                      ButtonSegment(value: true, label: Text('Infinite')),
-                    ],
-                    selected: {_infinite},
-                    onSelectionChanged: (value) =>
-                        _change(() => _infinite = value.first),
-                  ),
-                  if (!_infinite) ...[
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        IconButton(
-                          tooltip: 'Fewer questions',
-                          onPressed: _validCount && _count! > 1
-                              ? () => _changeCount(-1)
-                              : null,
-                          icon: const Icon(Icons.remove),
-                        ),
-                        SizedBox(
-                          width: 100,
-                          child: TextField(
-                            key: const ValueKey('question-count'),
-                            controller: _countController,
-                            textAlign: TextAlign.center,
-                            keyboardType: TextInputType.number,
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                            ],
-                            onChanged: (_) => _change(() {}),
-                            decoration: const InputDecoration(
-                              labelText: 'Questions',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'More questions',
-                          onPressed: _validCount ? () => _changeCount(1) : null,
-                          icon: const Icon(Icons.add),
-                        ),
-                      ],
-                    ),
-                    if (!_validCount)
-                      const Text('Enter a whole number of at least 1.'),
-                  ],
-                  const SizedBox(height: 20),
-                  Row(
+          : LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      IconButton(
-                        tooltip: 'Previous auto open column',
-                        onPressed:
-                            _autoOpenColumn != null && _autoOpenColumn! > 0
-                            ? () => _change(() {
-                                _autoOpenController.text =
-                                    '${_autoOpenColumn! - 1}';
-                              })
-                            : null,
-                        icon: const Icon(Icons.remove),
-                      ),
-                      Expanded(
-                        child: TextField(
-                          key: const ValueKey('auto-open-column'),
-                          controller: _autoOpenController,
-                          textAlign: TextAlign.center,
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                          ],
-                          onChanged: (_) => _change(() {}),
-                          decoration: const InputDecoration(
-                            labelText: 'Auto open column',
-                            border: OutlineInputBorder(),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Text('Question count'),
+                          const SizedBox(height: 8),
+                          SegmentedButton<bool>(
+                            expandedInsets: EdgeInsets.zero,
+                            segments: const [
+                              ButtonSegment(
+                                value: false,
+                                label: Text('Finite'),
+                              ),
+                              ButtonSegment(
+                                value: true,
+                                label: Text('Infinite'),
+                              ),
+                            ],
+                            selected: {_infinite},
+                            onSelectionChanged: (value) =>
+                                _change(() => _infinite = value.first),
                           ),
+                          if (!_infinite) ...[
+                            const SizedBox(height: 16),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                IconButton(
+                                  tooltip: 'Fewer questions',
+                                  onPressed: _validCount && _count! > 1
+                                      ? () => _changeCount(-1)
+                                      : null,
+                                  icon: const Icon(Icons.remove),
+                                ),
+                                Expanded(
+                                  child: TextField(
+                                    key: const ValueKey('question-count'),
+                                    controller: _countController,
+                                    textAlign: TextAlign.center,
+                                    keyboardType: TextInputType.number,
+                                    inputFormatters: [
+                                      FilteringTextInputFormatter.digitsOnly,
+                                    ],
+                                    onChanged: (_) => _change(() {}),
+                                    decoration: const InputDecoration(
+                                      labelText: 'Questions',
+                                      border: OutlineInputBorder(),
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: 'More questions',
+                                  onPressed: _validCount
+                                      ? () => _changeCount(1)
+                                      : null,
+                                  icon: const Icon(Icons.add),
+                                ),
+                              ],
+                            ),
+                            if (!_validCount)
+                              const Text('Enter a whole number of at least 1.'),
+                          ],
+                        ],
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Included tables'),
+                          const SizedBox(height: 8),
+                          SegmentedButton<bool>(
+                            segments: const [
+                              ButtonSegment(value: true, label: Text('All')),
+                              ButtonSegment(
+                                value: false,
+                                label: Text('Selected'),
+                              ),
+                            ],
+                            selected: {_allTables},
+                            onSelectionChanged: (value) =>
+                                _change(() => _allTables = value.first),
+                          ),
+                          if (!_allTables)
+                            ...widget.tables.map(
+                              (table) => CheckboxListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: Text(table.name),
+                                value: _selected.contains(table.name),
+                                onChanged: (value) => _change(() {
+                                  if (value == true) {
+                                    _selected.add(table.name);
+                                  } else {
+                                    _selected.remove(table.name);
+                                  }
+                                }),
+                              ),
+                            ),
+                        ],
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Question selection'),
+                            const SizedBox(height: 8),
+                            SegmentedButton<bool>(
+                              segments: const [
+                                ButtonSegment(
+                                  value: false,
+                                  label: Text('Equal Chance'),
+                                ),
+                                ButtonSegment(
+                                  value: true,
+                                  label: Text('Aggregated Chance'),
+                                ),
+                              ],
+                              selected: {_weighted},
+                              onSelectionChanged: (value) =>
+                                  _change(() => _weighted = value.first),
+                            ),
+                            if (_weighted) ...[
+                              const SizedBox(height: 12),
+                              _weightControl(
+                                'More important items',
+                                _importanceWeight,
+                                (value) =>
+                                    _change(() => _importanceWeight = value),
+                              ),
+                              _weightControl(
+                                'Items with low success rate',
+                                _lowSuccessWeight,
+                                (value) =>
+                                    _change(() => _lowSuccessWeight = value),
+                              ),
+                              _weightControl(
+                                'More items that are showned less',
+                                _lowAppearanceWeight,
+                                (value) =>
+                                    _change(() => _lowAppearanceWeight = value),
+                              ),
+                              if (_importanceWeight == 0 &&
+                                  _lowSuccessWeight == 0 &&
+                                  _lowAppearanceWeight == 0)
+                                const Text(
+                                  'All weights are zero, so entries have equal chance.',
+                                ),
+                            ],
+                          ],
                         ),
                       ),
-                      IconButton(
-                        tooltip: 'Next auto open column',
-                        onPressed: _autoOpenColumn != null
-                            ? () => _change(() {
-                                _autoOpenController.text =
-                                    '${_autoOpenColumn! + 1}';
-                              })
-                            : null,
-                        icon: const Icon(Icons.add),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const Text('Open a Colum automatically'),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                IconButton(
+                                  tooltip: 'Previous auto open column',
+                                  onPressed:
+                                      _autoOpenColumn != null &&
+                                          _autoOpenColumn! > 0
+                                      ? () => _change(() {
+                                          _autoOpenController.text =
+                                              '${_autoOpenColumn! - 1}';
+                                        })
+                                      : null,
+                                  icon: const Icon(Icons.remove),
+                                ),
+                                Expanded(
+                                  child: TextField(
+                                    key: const ValueKey('auto-open-column'),
+                                    controller: _autoOpenController,
+                                    textAlign: TextAlign.center,
+                                    keyboardType: TextInputType.number,
+                                    inputFormatters: [
+                                      FilteringTextInputFormatter.digitsOnly,
+                                    ],
+                                    onChanged: (_) => _change(() {}),
+                                    decoration: const InputDecoration(
+                                      labelText: 'Column index (0 is none)',
+                                      border: OutlineInputBorder(),
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: 'Next auto open column',
+                                  onPressed: _autoOpenColumn != null
+                                      ? () => _change(() {
+                                          _autoOpenController.text =
+                                              '${_autoOpenColumn! + 1}';
+                                        })
+                                      : null,
+                                  icon: const Icon(Icons.add),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 20),
-                  const Text('Included'),
-                  const SizedBox(height: 8),
-                  SegmentedButton<bool>(
-                    segments: const [
-                      ButtonSegment(value: true, label: Text('All tables')),
-                      ButtonSegment(
-                        value: false,
-                        label: Text('Selected tables'),
-                      ),
-                    ],
-                    selected: {_allTables},
-                    onSelectionChanged: (value) =>
-                        _change(() => _allTables = value.first),
-                  ),
-                  if (!_allTables)
-                    ...widget.tables.map(
-                      (table) => CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(table.name),
-                        value: _selected.contains(table.name),
-                        onChanged: (value) => _change(() {
-                          if (value == true) {
-                            _selected.add(table.name);
-                          } else {
-                            _selected.remove(table.name);
-                          }
-                        }),
-                      ),
-                    ),
-                  const SizedBox(height: 20),
-                  const Text('Question selection'),
-                  const SizedBox(height: 8),
-                  SegmentedButton<bool>(
-                    segments: const [
-                      ButtonSegment(value: false, label: Text('Equal Chance')),
-                      ButtonSegment(
-                        value: true,
-                        label: Text('Aggregated Chance'),
-                      ),
-                    ],
-                    selected: {_weighted},
-                    onSelectionChanged: (value) =>
-                        _change(() => _weighted = value.first),
-                  ),
-                  if (_weighted) ...[
-                    const SizedBox(height: 12),
-                    _weightControl(
-                      'More important items',
-                      _importanceWeight,
-                      (value) => _change(() => _importanceWeight = value),
-                    ),
-                    _weightControl(
-                      'Items with low success rate',
-                      _lowSuccessWeight,
-                      (value) => _change(() => _lowSuccessWeight = value),
-                    ),
-                    if (_importanceWeight == 0 && _lowSuccessWeight == 0)
-                      const Text(
-                        'Both weights are zero, so entries have equal chance.',
-                      ),
-                  ],
-                ],
+                ),
               ),
             ),
     ),

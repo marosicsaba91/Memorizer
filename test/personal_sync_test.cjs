@@ -51,19 +51,19 @@ function endpoint() {
 test('creates columns and keeps unset ratings blank', () => {
   const api = endpoint();
   assert.deepEqual(api.get(), { ok: true, version: 2, entries: [] });
-  assert.deepEqual(api.rows[0], ['Table', 'Entry', 'Importance', 'Success']);
+  assert.deepEqual(api.rows[0], ['Table', 'Entry', 'Importance', 'Success', 'Appered']);
   assert.equal(api.post([{ table: 'Words', entry: '=one', success: 8 }]).ok, true);
-  assert.deepEqual(api.rows[1], ['Words', '=one', '', 8]);
-  assert.deepEqual(api.get().entries, [{ table: 'Words', entry: '=one', importance: null, success: 8 }]);
+  assert.deepEqual(api.rows[1], ['Words', '=one', '', 8, '']);
+  assert.deepEqual(api.get().entries, [{ table: 'Words', entry: '=one', importance: null, success: 8, appeared: 0 }]);
 });
 
 test('resetting both fields and replacing with an empty snapshot removes rows', () => {
   const api = endpoint();
   api.post([{ table: 'Words', entry: 'one', importance: 3, success: 8 },
     { table: 'Words', entry: 'two', importance: 9 }]);
-  api.post([{ table: 'Words', entry: 'one', importance: null, success: 8 },
+  api.post([{ table: 'Words', entry: 'one', importance: null, success: 8, appeared: 0 },
     { table: 'Words', entry: 'two', importance: null, success: null }]);
-  assert.deepEqual(api.get().entries, [{ table: 'Words', entry: 'one', importance: null, success: 8 }]);
+  assert.deepEqual(api.get().entries, [{ table: 'Words', entry: 'one', importance: null, success: 8, appeared: 0 }]);
   api.post([]);
   assert.deepEqual(api.get().entries, []);
   assert.equal(api.rows.slice(1).every(row => row.every(value => value === '')), true);
@@ -75,3 +75,19 @@ test('invalid uploads preserve the previous snapshot', () => {
   assert.equal(api.post([{ table: 'Words', entry: 'one', success: 11 }]).ok, false);
   assert.equal(api.get().entries[0].success, 8);
 });
+
+ test('appearance-only results round trip and invalid counts preserve data', () => {
+  const api = endpoint();
+  assert.equal(api.post([{table: 'Words', entry: 'one', appeared: 7}]).ok, true);
+  assert.equal(api.get().entries[0].appeared, 7);
+  assert.equal(api.post([{table: 'Words', entry: 'one', appeared: -1}]).ok, false);
+  assert.equal(api.get().entries[0].appeared, 7);
+ });
+ test('existing four-column sheets gain the appearance column', () => {
+  const api = endpoint();
+  api.get();
+  api.rows[0].pop();
+  api.rows.push(['Words', 'one', '', 8]);
+  assert.equal(api.get().entries[0].appeared, 0);
+  assert.equal(api.rows[0][4], 'Appered');
+ });
