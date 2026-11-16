@@ -97,6 +97,10 @@ void main() {
       await tester.tap(find.text('Setup'));
       await tester.pumpAndSettle();
       await tester.enterText(
+        find.byKey(const ValueKey('auto-open-column')),
+        '2',
+      );
+      await tester.enterText(
         find.byKey(const ValueKey('question-count')),
         '37',
       );
@@ -107,6 +111,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('Words'));
       await tester.pump();
+      await tester.ensureVisible(find.text('Aggregated Chance'));
       await tester.tap(find.text('Aggregated Chance'));
       await tester.pumpAndSettle();
       final sliders = tester.widgetList<Slider>(find.byType(Slider)).toList();
@@ -121,9 +126,17 @@ void main() {
       expect(saved['selectedTables'], ['Words']);
       expect(saved['importanceWeight'], 4);
       expect(saved['lowSuccessWeight'], 7);
+      expect(saved['autoOpenColumn'], 2);
       await tester.tap(find.text('Setup'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('question-count')), findsNothing);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('auto-open-column')))
+            .controller!
+            .text,
+        '2',
+      );
       expect(
         tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
         isTrue,
@@ -146,6 +159,52 @@ void main() {
       );
     },
   );
+
+  for (final column in [0, 1, 2, 3]) {
+    testWidgets('auto open column $column and toggle revealed fields', (
+      tester,
+    ) async {
+      const table = KnowledgeTable(
+        name: 'Toggle',
+        rows: [
+          ['Front', 'Back'],
+          ['front value', 'back value'],
+        ],
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: GameScreen(
+            tables: const [table],
+            settings: GameSettings(autoOpenColumn: column),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('front value'),
+        column == 1 ? findsOneWidget : findsNothing,
+      );
+      expect(
+        find.text('back value'),
+        column == 2 ? findsOneWidget : findsNothing,
+      );
+      expect(find.text('Front'), column == 1 ? findsNothing : findsOneWidget);
+      expect(find.text('Back'), column == 2 ? findsNothing : findsOneWidget);
+      await tester.tap(find.text('Show Answer'));
+      await tester.pumpAndSettle();
+      expect(find.text('Front'), findsNothing);
+      expect(find.text('Back'), findsNothing);
+      await tester.tap(find.text('front value'));
+      await tester.pumpAndSettle();
+      expect(find.text('front value'), findsNothing);
+      expect(find.text('Front'), findsOneWidget);
+      expect(find.text('Show Answer'), findsOneWidget);
+      await tester.tap(find.text('Front'));
+      await tester.pumpAndSettle();
+      expect(find.text('front value'), findsOneWidget);
+      expect(find.text('Almost'), findsOneWidget);
+    });
+  }
 
   testWidgets(
     'revealed text is centered and shrinks with length; reveal prompts are translucent',
@@ -301,6 +360,7 @@ void main() {
       );
       await tester.tap(find.text('Setup'));
       await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Aggregated Chance'));
       await tester.tap(find.text('Aggregated Chance'));
       await tester.pumpAndSettle();
       final sliders = tester.widgetList<Slider>(find.byType(Slider)).toList();

@@ -76,7 +76,10 @@ class _GameScreenState extends State<GameScreen> {
 
   void _prepareQuestion() {
     final entry = _session?.current;
-    _revealed = List.generate(entry?.cells.length ?? 0, (index) => index == 0);
+    _revealed = List.generate(
+      entry?.cells.length ?? 0,
+      (index) => index + 1 == widget.settings.autoOpenColumn,
+    );
     if (_scroll.hasClients) _scroll.jumpTo(0);
   }
 
@@ -270,19 +273,22 @@ class _GameScreenState extends State<GameScreen> {
                   ? Theme.of(context).colorScheme.surface
                   : Theme.of(context).colorScheme.secondaryContainer,
               child: InkWell(
-                onTap: _revealed[index]
+                onTap: _saving
                     ? null
-                    : () => setState(() => _revealed[index] = true),
+                    : () =>
+                          setState(() => _revealed[index] = !_revealed[index]),
                 child: Padding(
                   padding: const EdgeInsets.all(20),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text(
-                        entry.headers[index],
-                        style: Theme.of(context).textTheme.labelMedium,
-                      ),
-                      const SizedBox(height: 12),
+                      if (!_revealed[index]) ...[
+                        Text(
+                          entry.headers[index],
+                          style: Theme.of(context).textTheme.labelMedium,
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                       Text(
                         _revealed[index]
                             ? (entry.cells[index].isEmpty

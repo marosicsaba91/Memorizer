@@ -10,6 +10,7 @@ class GameSettings {
   final bool weighted;
   final int importanceWeight;
   final int lowSuccessWeight;
+  final int autoOpenColumn;
 
   const GameSettings({
     this.questionCount = 10,
@@ -17,6 +18,7 @@ class GameSettings {
     this.weighted = false,
     this.importanceWeight = 1,
     this.lowSuccessWeight = 2,
+    this.autoOpenColumn = 1,
   }) : assert(importanceWeight >= 0 && importanceWeight <= 10),
        assert(lowSuccessWeight >= 0 && lowSuccessWeight <= 10);
 
@@ -26,6 +28,7 @@ class GameSettings {
     'weighted': weighted,
     'importanceWeight': importanceWeight,
     'lowSuccessWeight': lowSuccessWeight,
+    'autoOpenColumn': autoOpenColumn,
   };
 
   factory GameSettings.fromJson(Map<String, dynamic> json) => GameSettings(
@@ -39,6 +42,9 @@ class GameSettings {
         ? (json['selectedTables'] as List).whereType<String>().toSet()
         : null,
     weighted: json['weighted'] == true,
+    autoOpenColumn: json['autoOpenColumn'] is int
+        ? json['autoOpenColumn'] as int
+        : 1,
     importanceWeight: json['importanceWeight'] is int
         ? (json['importanceWeight'] as int).clamp(0, 10)
         : 1,

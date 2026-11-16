@@ -18,6 +18,8 @@ class GameSetupDialog extends StatefulWidget {
 class _GameSetupDialogState extends State<GameSetupDialog> {
   bool _infinite = false;
   final _countController = TextEditingController(text: '10');
+  final _autoOpenController = TextEditingController(text: '1');
+  int? get _autoOpenColumn => int.tryParse(_autoOpenController.text);
   int? get _count => int.tryParse(_countController.text);
   bool get _validCount => _count != null && _count! >= 1;
   int _importanceWeight = 1;
@@ -53,6 +55,7 @@ class _GameSetupDialogState extends State<GameSetupDialog> {
       _weighted = settings.weighted;
       _importanceWeight = settings.importanceWeight;
       _lowSuccessWeight = settings.lowSuccessWeight;
+      _autoOpenController.text = settings.autoOpenColumn.toString();
     }
     setState(() => _loading = false);
   }
@@ -63,11 +66,12 @@ class _GameSetupDialogState extends State<GameSetupDialog> {
     weighted: _weighted,
     importanceWeight: _importanceWeight,
     lowSuccessWeight: _lowSuccessWeight,
+    autoOpenColumn: _autoOpenColumn ?? 0,
   );
 
   void _change(VoidCallback update) {
     setState(update);
-    if (!_validCount) return;
+    if (!_validCount || _autoOpenColumn == null) return;
     final settings = _settings;
     final count = _count!;
     _pendingSave = _pendingSave
@@ -75,11 +79,7 @@ class _GameSetupDialogState extends State<GameSetupDialog> {
         .catchError((Object error) {
           if (mounted)
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  'Could not save game settings: $error',
-                ),
-              ),
+              SnackBar(content: Text('Could not save game settings: $error')),
             );
         });
   }
@@ -101,6 +101,7 @@ class _GameSetupDialogState extends State<GameSetupDialog> {
   @override
   void dispose() {
     _countController.dispose();
+    _autoOpenController.dispose();
     super.dispose();
   }
 
@@ -196,6 +197,21 @@ class _GameSetupDialogState extends State<GameSetupDialog> {
                       const Text('Enter a whole number of at least 1.'),
                   ],
                   const SizedBox(height: 20),
+                  TextField(
+                    key: const ValueKey('auto-open-column'),
+                    controller: _autoOpenController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    onChanged: (_) => _change(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'Auto open column',
+                      helperText:
+                          '1 is the first column. 0 or a number beyond the table opens none.',
+                      helperMaxLines: 3,
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
                   const Text('Included'),
                   const SizedBox(height: 8),
                   SegmentedButton<bool>(
@@ -271,6 +287,7 @@ class _GameSetupDialogState extends State<GameSetupDialog> {
             _loading ||
                 widget.tables.isEmpty ||
                 (!_allTables && _selected.isEmpty) ||
+                _autoOpenColumn == null ||
                 (!_infinite && !_validCount)
             ? null
             : _start,
