@@ -32,6 +32,7 @@ class StorageService {
     return ProfileSettings(
       syncUrl: prefs.getString('profile/sync_url') ?? '',
       autoSync: prefs.getBool('profile/auto_sync') ?? false,
+      mainSheetUrl: prefs.getString('profile/main_sheet_url') ?? '',
     );
   }
 
@@ -39,6 +40,10 @@ class StorageService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('profile/sync_url', settings.syncUrl.trim());
     await prefs.setBool('profile/auto_sync', settings.autoSync);
+    await prefs.setString(
+      'profile/main_sheet_url',
+      settings.mainSheetUrl.trim(),
+    );
   }
 
   Future<Map<String, RowSaveData>> ensureTableRowData(

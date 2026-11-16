@@ -1,0 +1,40 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Android: Build APK and open folder",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Android: Build release APK",
+        "Android: Open APK folder"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Android: Build release APK",
+      "type": "shell",
+      "command": "flutter",
+      "args": ["build", "apk", "--release"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Android: Open APK folder",
+      "type": "process",
+      "command": "explorer.exe",
+      "args": ["${workspaceFolder}\\build\\app\\outputs\\flutter-apk"],
+      "problemMatcher": []
+    }
+  ]
+}

@@ -5,13 +5,6 @@ import 'package:http/http.dart' as http;
 import '../models/knowledge_entry.dart';
 import '../models/knowledge_table.dart';
 
-/// ---------------------------------------------------------------
-///  CONFIGURE THIS: replace with your main index sheet's URL.
-///  Accepts the regular "share" URL or the /export?format=csv form.
-/// ---------------------------------------------------------------
-const String kMainSheetUrl =
-    'https://docs.google.com/spreadsheets/d/e/2PACX-1vQjnWRTHvXlPrQ32VgPR8qmVU0P-4gEIDmKQyTXxvGx_4hEHlOGOpcJs40xYg44xYeDrh7vnJoKi8Zv/pub?gid=0&single=true&output=csv';
-
 class SheetsService {
   final http.Client? client;
 
@@ -23,8 +16,14 @@ class SheetsService {
 
   /// Downloads the main index sheet and returns one [KnowledgeEntry]
   /// per non-empty row.  Expected CSV format: name , sheet_url
-  Future<List<KnowledgeEntry>> fetchMainSheet() async {
-    final csvUrl = _toExportCsvUrl(kMainSheetUrl) ?? kMainSheetUrl;
+  Future<List<KnowledgeEntry>> fetchMainSheet(String mainSheetUrl) async {
+    final url = mainSheetUrl.trim();
+    if (url.isEmpty) {
+      throw const FormatException(
+        'Enter the main sheet URL in Settings first.',
+      );
+    }
+    final csvUrl = _toExportCsvUrl(url) ?? url;
     final rows = await _fetchCsv(csvUrl);
     return rows
         .where((r) => r.length >= 2 && r[0].trim().isNotEmpty)

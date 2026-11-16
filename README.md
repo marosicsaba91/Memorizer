@@ -2,6 +2,14 @@
 
 A Flutter app for studying tables, playing practice rounds, and optionally syncing personal results.
 
+## Android build from VS Code
+
+Choose **Terminal → Run Build Task** or press **Ctrl+Shift+B** to build a release APK. The build downloads Flutter dependencies as needed and opens the output folder after success. Copy `app-release.apk` to your Android phone and open it to install.
+
+Flutter must be on PATH, with the Android SDK installed and its licenses accepted. Build progress and any setup errors appear in the VS Code terminal.
+
+The current Android configuration signs release builds with the debug key. Publishing to Google Play requires your own release signing configuration.
+
 ## GitHub Pages
 
 The workflow in `.github/workflows/deploy-web.yml` tests, builds, and deploys the web app on every push to `main`. It uses Flutter 3.50.0 and the committed `pubspec.lock` to keep dependency versions consistent.

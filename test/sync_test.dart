@@ -132,13 +132,20 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField), url);
+      const mainSheetUrl = 'https://example.com/tables.csv';
+      await tester.enterText(
+        find.byKey(const ValueKey('mainSheetUrl')),
+        mainSheetUrl,
+      );
+      await tester.enterText(find.byKey(const ValueKey('syncUrl')), url);
       await tester.tap(find.text('Enable autosync'));
+      await tester.ensureVisible(find.text('Save settings'));
       await tester.tap(find.text('Save settings'));
       await tester.pumpAndSettle();
       final settings = await storage.loadProfileSettings();
       expect(settings.syncUrl, url);
       expect(settings.autoSync, isTrue);
+      expect(settings.mainSheetUrl, mainSheetUrl);
       expect(methods, isEmpty);
       await tester.ensureVisible(find.text('Refresh local data from web'));
       await tester.tap(find.text('Refresh local data from web'));

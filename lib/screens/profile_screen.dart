@@ -16,6 +16,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final _storage = StorageService();
   final _url = TextEditingController();
+  final _mainSheetUrl = TextEditingController();
   bool _autoSync = false;
   bool _loading = true;
   bool _busy = false;
@@ -33,6 +34,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (!mounted) return;
     setState(() {
       _url.text = settings.syncUrl;
+      _mainSheetUrl.text = settings.mainSheetUrl;
       _autoSync = settings.autoSync;
       _loading = false;
     });
@@ -46,6 +48,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
     try {
       final url = _url.text.trim();
+      final mainSheetUrl = _mainSheetUrl.text.trim();
+      if (mainSheetUrl.isNotEmpty) {
+        final uri = Uri.tryParse(mainSheetUrl);
+        if (uri == null ||
+            !['https', 'http'].contains(uri.scheme) ||
+            uri.host.isEmpty) {
+          throw const FormatException('Enter a valid main sheet URL.');
+        }
+      }
       if (url.isNotEmpty) RatingsSyncService.endpoint(url);
       if (url.isEmpty && (_autoSync || download != null)) {
         throw const FormatException(
@@ -53,9 +64,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         );
       }
       await _storage.saveProfileSettings(
-        ProfileSettings(syncUrl: url, autoSync: _autoSync),
+        ProfileSettings(
+          syncUrl: url,
+          autoSync: _autoSync,
+          mainSheetUrl: mainSheetUrl,
+        ),
       );
-      String message = 'Profile settings saved.';
+      String message = 'Settings saved.';
       if (download != null) {
         final count = download
             ? await widget.sync.download(url)
@@ -75,6 +90,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void dispose() {
     _url.dispose();
+    _mainSheetUrl.dispose();
     super.dispose();
   }
 
@@ -100,12 +116,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Profile')),
+    appBar: AppBar(title: const Text('Settings')),
     body: _loading
         ? const Center(child: CircularProgressIndicator())
         : ListView(
             padding: const EdgeInsets.all(20),
             children: [
+              TextField(
+                key: const ValueKey('mainSheetUrl'),
+                controller: _mainSheetUrl,
+                enabled: !_busy,
+                keyboardType: TextInputType.url,
+                autocorrect: false,
+                decoration: const InputDecoration(
+                  labelText: 'Main sheet URL',
+                  helperText: 'Save, then refresh tables on the home screen.',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 24),
               const Text(
                 'Personal Results',
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
@@ -116,6 +145,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 20),
               TextField(
+                key: const ValueKey('syncUrl'),
                 controller: _url,
                 enabled: !_busy,
                 keyboardType: TextInputType.url,
@@ -182,7 +212,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Padding(
                   padding: const EdgeInsets.only(top: 16),
                   child: Text(
-                    'Sync failed: $_error',
+                    '$_error',
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.error,
                     ),

@@ -93,7 +93,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _refresh() async {
     setState(() => _isRefreshing = true);
     try {
-      final entries = await _sheetsService.fetchMainSheet();
+      final settings = await _storageService.loadProfileSettings();
+      final entries = await _sheetsService.fetchMainSheet(
+        settings.mainSheetUrl,
+      );
 
       final tables = <KnowledgeTable>[];
       for (final entry in entries) {
@@ -184,8 +187,8 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Memorizer'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.person_outline),
-            tooltip: 'Profile',
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
             onPressed: _starting
                 ? null
                 : () => Navigator.push(
