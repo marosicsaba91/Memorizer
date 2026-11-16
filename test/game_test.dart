@@ -96,7 +96,9 @@ void main() {
         expect(game.isReviewing, isTrue);
         game.answer(GameAnswer.failed);
         expect(game.answered, 1);
-        expect(game.results[GameAnswer.failed], 0);
+        expect(game.results[GameAnswer.failed], 1);
+        expect(game.results[GameAnswer.knew], 0);
+        expect(game.current, same(first));
         game.goForward();
         expect(game.current, same(second));
         expect(game.questionNumber, 2);
@@ -107,6 +109,25 @@ void main() {
       }
     },
   );
+
+  test('regrading recalculates clamped ratings across repeated entries', () {
+    final entry = GameEntry.fromTable(words, {}).first;
+    entry.personalSuccess = 10;
+    final game = GameSession(
+      entries: [entry],
+      settings: const GameSettings(questionCount: null),
+    );
+    entry.personalSuccess = game.successForAnswer(GameAnswer.knew);
+    game.answer(GameAnswer.knew);
+    entry.personalSuccess = game.successForAnswer(GameAnswer.failed);
+    game.answer(GameAnswer.failed);
+    expect(entry.success, 9);
+    game.goBack();
+    game.goBack();
+    expect(game.successForAnswer(GameAnswer.failed), 8);
+    expect(game.successForAnswer(GameAnswer.almost), 9);
+    expect(game.successForAnswer(GameAnswer.knew), 9);
+  });
 
   testWidgets(
     'game setup automatically remembers choices across dialog openings',
@@ -614,7 +635,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Question 1 / 3'), findsOneWidget);
       expect(find.text('answer $first'), findsOneWidget);
-      expect(find.text('Failed'), findsNothing);
+      expect(find.text('Failed'), findsOneWidget);
+      await tester.tap(find.text('I knew'));
+      await tester.pumpAndSettle();
+      expect(find.text('Question 1 / 3'), findsOneWidget);
+      expect((await storage.loadTableRowData('Words'))![first]!.success, 6);
+      await tester.tap(find.text('Failed'));
+      await tester.pumpAndSettle();
+      expect((await storage.loadTableRowData('Words'))![first]!.success, 4);
       await tester.tap(find.text('Next'));
       await tester.pumpAndSettle();
       expect(find.text('Question 2 / 3'), findsOneWidget);
@@ -639,7 +667,7 @@ void main() {
       expect(updated[second]!.success, isNull);
       expect(updated[third]!.success, 6);
       expect(updated[first]!.revealed, [true, true, true]);
-      expect(changes, 3);
+      expect(changes, 5);
       await tester.tap(find.text('New Round'));
       await tester.pumpAndSettle();
       expect(find.text('Question 1 / 3'), findsOneWidget);

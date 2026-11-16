@@ -197,19 +197,46 @@ class _GameSetupDialogState extends State<GameSetupDialog> {
                       const Text('Enter a whole number of at least 1.'),
                   ],
                   const SizedBox(height: 20),
-                  TextField(
-                    key: const ValueKey('auto-open-column'),
-                    controller: _autoOpenController,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    onChanged: (_) => _change(() {}),
-                    decoration: const InputDecoration(
-                      labelText: 'Auto open column',
-                      helperText:
-                          '1 is the first column. 0 or a number beyond the table opens none.',
-                      helperMaxLines: 3,
-                      border: OutlineInputBorder(),
-                    ),
+                  Row(
+                    children: [
+                      IconButton(
+                        tooltip: 'Previous auto open column',
+                        onPressed:
+                            _autoOpenColumn != null && _autoOpenColumn! > 0
+                            ? () => _change(() {
+                                _autoOpenController.text =
+                                    '${_autoOpenColumn! - 1}';
+                              })
+                            : null,
+                        icon: const Icon(Icons.remove),
+                      ),
+                      Expanded(
+                        child: TextField(
+                          key: const ValueKey('auto-open-column'),
+                          controller: _autoOpenController,
+                          textAlign: TextAlign.center,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
+                          onChanged: (_) => _change(() {}),
+                          decoration: const InputDecoration(
+                            labelText: 'Auto open column',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Next auto open column',
+                        onPressed: _autoOpenColumn != null
+                            ? () => _change(() {
+                                _autoOpenController.text =
+                                    '${_autoOpenColumn! + 1}';
+                              })
+                            : null,
+                        icon: const Icon(Icons.add),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 20),
                   const Text('Included'),

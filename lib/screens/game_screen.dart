@@ -146,18 +146,16 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   Future<void> _answer(GameAnswer answer) async {
-    if (_saving ||
-        _session!.isReviewing ||
-        !_revealed.every((value) => value)) {
+    if (_saving || !_revealed.every((value) => value)) {
       return;
     }
     final entry = _session!.current!;
     final previous = entry.personalSuccess;
     setState(() => _saving = true);
     try {
-      if (answer != GameAnswer.almost) {
-        entry.personalSuccess =
-            (entry.success + (answer == GameAnswer.knew ? 1 : -1)).clamp(1, 10);
+      final success = _session!.successForAnswer(answer);
+      if (success != previous) {
+        entry.personalSuccess = success;
         await _persist(entry);
         unawaited(_notifyChanged());
       }
@@ -437,7 +435,7 @@ class _GameScreenState extends State<GameScreen> {
                         child: const Text('Show Answer'),
                       ),
                     )
-                  else if (!session!.isReviewing)
+                  else
                     Row(
                       children: [
                         Expanded(

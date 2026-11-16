@@ -125,6 +125,8 @@ class GameSession {
     for (final answer in GameAnswer.values) answer: 0,
   };
   final List<GameEntry> _history = [];
+  final List<GameAnswer?> _answers = [];
+  final Map<GameEntry, int?> _initialSuccess = {};
   int _position = 0;
   bool _completed = false;
 
@@ -134,6 +136,22 @@ class GameSession {
   bool get isReviewing => _position < answered;
   bool get canGoBack => !finished && _position > 0;
   bool get canGoForward => !finished && _position < _history.length - 1;
+  GameAnswer? get currentAnswer => finished ? null : _answers[_position];
+
+  int? successForAnswer(GameAnswer answer) {
+    final entry = current!;
+    var success = _initialSuccess[entry];
+    for (var i = 0; i < _history.length; i++) {
+      if (!identical(_history[i], entry)) continue;
+      final grade = i == _position ? answer : _answers[i];
+      if (grade == null || grade == GameAnswer.almost) continue;
+      success = ((success ?? 5) + (grade == GameAnswer.knew ? 1 : -1)).clamp(
+        1,
+        10,
+      );
+    }
+    return success;
+  }
 
   void goBack() {
     if (canGoBack) _position--;
@@ -158,7 +176,14 @@ class GameSession {
   bool get finished => current == null;
 
   void answer(GameAnswer answer) {
-    if (finished || isReviewing) return;
+    if (finished) return;
+    final previous = currentAnswer;
+    _answers[_position] = answer;
+    if (previous != null) {
+      results[previous] = results[previous]! - 1;
+      results[answer] = results[answer]! + 1;
+      return;
+    }
     results[answer] = results[answer]! + 1;
     if (total != null && answered >= total!) {
       _completed = true;
@@ -184,6 +209,9 @@ class GameSession {
       index = random.nextInt(_remaining.length);
     }
     _history.add(_remaining.removeAt(index));
+    _answers.add(null);
+    final entry = _history.last;
+    _initialSuccess.putIfAbsent(entry, () => entry.personalSuccess);
     _position = _history.length - 1;
   }
 }
