@@ -750,10 +750,26 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
               builder: (context, constraints) {
                 const indexWidth = 40.0;
                 final totalDataWidth = constraints.maxWidth - indexWidth;
-                final colWidths = List.generate(
-                  _numCols,
-                  (i) => _colWidthFractions[i] * totalDataWidth,
+                final inlineColumns = <int>[];
+                final multilineColumns = <int>[];
+                for (var v = 0; v < _numCols; v++) {
+                  final column = _columnOrder[v];
+                  final hasLineBreak = _dataRows.any(
+                    (row) =>
+                        column < row.length &&
+                        (row[column].contains('\n') ||
+                            row[column].contains('\r')),
+                  );
+                  (hasLineBreak ? multilineColumns : inlineColumns).add(v);
+                }
+                final inlineFraction = inlineColumns.fold<double>(
+                  0,
+                  (sum, v) => sum + _colWidthFractions[v],
                 );
+                final colWidths = <int, double>{
+                  for (final v in inlineColumns)
+                    v: _colWidthFractions[v] / inlineFraction * totalDataWidth,
+                };
 
                 final dragHandleTop = MediaQuery.paddingOf(context).top;
                 final dataTable = SingleChildScrollView(
@@ -773,15 +789,13 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                               TableCellVerticalAlignment.intrinsicHeight,
                           columnWidths: {
                             0: const FixedColumnWidth(indexWidth),
-                            for (var i = 0; i < _numCols; i++)
-                              i + 1: FixedColumnWidth(colWidths[i]),
+                            1: FixedColumnWidth(totalDataWidth),
                           },
                           border: TableBorder.all(
                             color: Colors.black,
                             width: 1,
                           ),
                           children: _displayOrder.map((origIdx) {
-                            final row = _dataRows[origIdx];
                             final rowColor = _successColor(_successes[origIdx]);
                             return TableRow(
                               key: ValueKey(origIdx),
@@ -810,19 +824,65 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                                     ),
                                   ),
                                 ),
-                                // Data cells
-                                for (var v = 0; v < _numCols; v++)
-                                  _draggableDataCell(
-                                    isLastOpened: _isLastOpened(origIdx, v),
-                                    visualColIdx: v,
-                                    text: _columnOrder[v] < row.length
-                                        ? row[_columnOrder[v]]
-                                        : '',
-                                    columnName: _headers[_columnOrder[v]],
-                                    revealed: _isRevealed(origIdx, v),
-                                    hiddenColor: hiddenColor,
-                                    onTap: () => _toggleRevealed(origIdx, v),
-                                  ),
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    if (inlineColumns.isNotEmpty)
+                                      Table(
+                                        defaultVerticalAlignment:
+                                            TableCellVerticalAlignment
+                                                .intrinsicHeight,
+                                        columnWidths: {
+                                          for (
+                                            var i = 0;
+                                            i < inlineColumns.length;
+                                            i++
+                                          )
+                                            i: FixedColumnWidth(
+                                              colWidths[inlineColumns[i]]!,
+                                            ),
+                                        },
+                                        border: const TableBorder(
+                                          verticalInside: BorderSide(),
+                                        ),
+                                        children: [
+                                          TableRow(
+                                            children: [
+                                              for (final v in inlineColumns)
+                                                _buildDataCell(
+                                                  origIdx,
+                                                  v,
+                                                  hiddenColor,
+                                                ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    for (
+                                      var i = 0;
+                                      i < multilineColumns.length;
+                                      i++
+                                    )
+                                      Container(
+                                        decoration: BoxDecoration(
+                                          border: Border(
+                                            top:
+                                                inlineColumns.isNotEmpty ||
+                                                    i > 0
+                                                ? const BorderSide()
+                                                : BorderSide.none,
+                                          ),
+                                        ),
+                                        child: _buildDataCell(
+                                          origIdx,
+                                          multilineColumns[i],
+                                          hiddenColor,
+                                        ),
+                                      ),
+                                  ],
+                                ),
                               ],
                             );
                           }).toList(),
@@ -834,9 +894,10 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                 // Drag handles for column dividers.
                 var leftEdge = indexWidth;
                 final handles = <Widget>[];
-                for (var v = 0; v < _numCols - 1; v++) {
-                  leftEdge += colWidths[v];
-                  final capturedV = v;
+                for (var i = 0; i < inlineColumns.length - 1; i++) {
+                  final capturedV = inlineColumns[i];
+                  final nextV = inlineColumns[i + 1];
+                  leftEdge += colWidths[capturedV]!;
                   const handleWidth = 16.0;
                   handles.add(
                     Positioned(
@@ -851,11 +912,13 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                           onHorizontalDragUpdate: (details) {
                             setState(() {
                               const minFraction = 0.05;
-                              final delta = details.delta.dx / totalDataWidth;
+                              final delta =
+                                  details.delta.dx /
+                                  totalDataWidth *
+                                  inlineFraction;
                               var newLeft =
                                   _colWidthFractions[capturedV] + delta;
-                              var newRight =
-                                  _colWidthFractions[capturedV + 1] - delta;
+                              var newRight = _colWidthFractions[nextV] - delta;
                               if (newLeft < minFraction) {
                                 newRight -= (minFraction - newLeft);
                                 newLeft = minFraction;
@@ -865,7 +928,7 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                                 newRight = minFraction;
                               }
                               _colWidthFractions[capturedV] = newLeft;
-                              _colWidthFractions[capturedV + 1] = newRight;
+                              _colWidthFractions[nextV] = newRight;
                             });
                           },
                         ),
@@ -956,6 +1019,20 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
   }
 
   // ── widget helpers ─────────────────────────────────────────────
+
+  Widget _buildDataCell(int origIdx, int visualColIdx, Color hiddenColor) {
+    final row = _dataRows[origIdx];
+    final column = _columnOrder[visualColIdx];
+    return _draggableDataCell(
+      isLastOpened: _isLastOpened(origIdx, visualColIdx),
+      visualColIdx: visualColIdx,
+      text: column < row.length ? row[column] : '',
+      columnName: _headers[column],
+      revealed: _isRevealed(origIdx, visualColIdx),
+      hiddenColor: hiddenColor,
+      onTap: () => _toggleRevealed(origIdx, visualColIdx),
+    );
+  }
 
   Widget _draggableDataCell({
     required bool isLastOpened,
