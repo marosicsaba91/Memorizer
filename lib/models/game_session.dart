@@ -4,7 +4,7 @@ import 'knowledge_table.dart';
 import 'row_save_data.dart';
 
 class GameSettings {
-  /// Null means an infinite round.
+  /// Null selects all included questions.
   final int? questionCount;
   final Set<String>? selectedTables;
   final bool weighted;
@@ -67,22 +67,22 @@ class GameEntry {
   final KnowledgeTable table;
   final List<String> cells;
   final List<String> headers;
-  int? personalImportance;
-  int? personalSuccess;
-  int appeared;
+  RowSaveData results;
 
   GameEntry({
     required this.table,
     required this.cells,
     required this.headers,
-    this.personalImportance,
-    this.personalSuccess,
-    this.appeared = 0,
-  });
+    RowSaveData? results,
+  }) : results = results ?? const RowSaveData(rowOrder: 0, revealed: []);
 
   String get key => cells.first;
-  int get importance => personalImportance ?? table.importance[key] ?? 5;
-  int get success => personalSuccess ?? 5;
+  int get importance => results.importance ?? table.importance[key] ?? 0;
+  int? get personalImportance => results.importance;
+  int get appeared => results.appeared;
+  int get failedCount => results.failedCount;
+  int get almostCount => results.almostCount;
+  int get successCount => results.successCount;
 
   static List<GameEntry> fromTable(
     KnowledgeTable table,
@@ -99,12 +99,12 @@ class GameEntry {
     if (width == 0) return [];
     final headers = List.generate(
       width,
-      (i) =>
+      (index) =>
           hasHeader &&
-              i < table.rows.first.length &&
-              table.rows.first[i].isNotEmpty
-          ? table.rows.first[i]
-          : 'Column ${i + 1}',
+              index < table.rows.first.length &&
+              table.rows.first[index].isNotEmpty
+          ? KnowledgeTable.columnLabel(table.rows.first[index])
+          : 'Column ${index + 1}',
     );
     return table.rows
         .skip(hasHeader ? 1 : 0)
@@ -112,15 +112,45 @@ class GameEntry {
         .map(
           (row) => GameEntry(
             table: table,
-            cells: List.generate(width, (i) => i < row.length ? row[i] : ''),
             headers: headers,
-            personalImportance: saved[row.first]?.importance,
-            personalSuccess: saved[row.first]?.success,
-            appeared: saved[row.first]?.appeared ?? 0,
+            cells: List.generate(
+              width,
+              (index) => index < row.length ? row[index] : '',
+            ),
+            results: saved[row.first],
           ),
         )
         .toList();
   }
+}
+
+class QuestionWeight {
+  final int usedImportance;
+  final int successDelta;
+  final int maxSuccessDelta;
+  final int appeared;
+  final int maxAppeared;
+  final int importanceWeight;
+  final int successWeight;
+  final int appearanceWeight;
+
+  const QuestionWeight({
+    required this.usedImportance,
+    required this.successDelta,
+    required this.maxSuccessDelta,
+    required this.appeared,
+    required this.maxAppeared,
+    required this.importanceWeight,
+    required this.successWeight,
+    required this.appearanceWeight,
+  });
+
+  int get adjustedSuccess => maxSuccessDelta - successDelta;
+  int get adjustedAppearance => maxAppeared - appeared;
+  int get importanceSubtotal => usedImportance * importanceWeight;
+  int get successSubtotal => adjustedSuccess * successWeight;
+  int get appearanceSubtotal => adjustedAppearance * appearanceWeight;
+  int get total => importanceSubtotal + successSubtotal + appearanceSubtotal;
 }
 
 class GameSession {
@@ -128,52 +158,87 @@ class GameSession {
   final GameSettings settings;
   final Random random;
   final List<GameEntry> _remaining = [];
-  final Set<(String, String)> _shown = {};
-
-  double selectionWeight(GameEntry entry) {
-    final minimum = entries.map((e) => e.appeared).reduce(min);
-    final maximum = entries.map((e) => e.appeared).reduce(max);
-    final normalized = maximum == minimum
-        ? 0.0
-        : (entry.appeared - minimum) / (maximum - minimum);
-    return max(
-      1.0,
-          entry.importance * settings.importanceWeight +
-          (11 - entry.success) * settings.lowSuccessWeight +
-          (1 - normalized) * 10 * settings.lowAppearanceWeight,
-    );
-  }
-
+  final Map<GameEntry, QuestionWeight> _weights = {};
+  final Map<GameEntry, double> _selectionMeans = {};
   final Map<GameAnswer, int> results = {
     for (final answer in GameAnswer.values) answer: 0,
   };
   final List<GameEntry> _history = [];
   final List<GameAnswer?> _answers = [];
-  final Map<GameEntry, int?> _initialSuccess = {};
   int _position = 0;
   bool _completed = false;
 
+  GameSession({
+    required List<GameEntry> entries,
+    required this.settings,
+    Random? random,
+  }) : entries = _uniqueEntries(entries),
+       random = random ?? Random() {
+    if (settings.questionCount != null && settings.questionCount! < 1) {
+      throw ArgumentError('Question count must be positive.');
+    }
+    if (this.entries.isEmpty) return;
+    final maxSuccessDelta = this.entries
+        .map((entry) => entry.successCount - entry.failedCount)
+        .reduce(max);
+    final maxAppeared = this.entries.map((entry) => entry.appeared).reduce(max);
+    for (final entry in this.entries) {
+      _weights[entry] = QuestionWeight(
+        usedImportance: entry.importance,
+        successDelta: entry.successCount - entry.failedCount,
+        maxSuccessDelta: maxSuccessDelta,
+        appeared: entry.appeared,
+        maxAppeared: maxAppeared,
+        importanceWeight: settings.importanceWeight,
+        successWeight: settings.lowSuccessWeight,
+        appearanceWeight: settings.lowAppearanceWeight,
+      );
+    }
+    _remaining.addAll(this.entries);
+    _next();
+  }
+
+  static List<GameEntry> _uniqueEntries(List<GameEntry> entries) {
+    final seen = <(String, String)>{};
+    return entries
+        .where((entry) => seen.add((entry.table.name, entry.key)))
+        .toList();
+  }
+
   GameEntry? get current =>
       _completed || _history.isEmpty ? null : _history[_position];
+  List<GameEntry> get history => List.unmodifiable(_history);
   int get questionNumber => _position + 1;
-  bool get isReviewing => _position < answered;
+  int get answered => results.values.fold(0, (total, count) => total + count);
+  int get total =>
+      min(settings.questionCount ?? entries.length, entries.length);
+  bool get finished => current == null;
+  bool get roundComplete => answered >= total;
+  bool get isReviewing => !finished && currentAnswer != null;
   bool get canGoBack => !finished && _position > 0;
   bool get canGoForward => !finished && _position < _history.length - 1;
   GameAnswer? get currentAnswer => finished ? null : _answers[_position];
+  QuestionWeight weightDetails(GameEntry entry) => _weights[entry]!;
+  int selectionWeight(GameEntry entry) => weightDetails(entry).total;
+  double meanWeight(GameEntry entry) => _selectionMeans[entry]!;
+  double relativeWeight(GameEntry entry) {
+    final mean = meanWeight(entry);
+    return mean == 0 ? 1 : selectionWeight(entry) / mean;
+  }
 
-  int? successForAnswer(GameAnswer answer) {
-    final entry = current!;
-    var success = _initialSuccess[entry];
-    for (var i = 0; i < _history.length; i++) {
-      if (!identical(_history[i], entry)) continue;
-      final grade = i == _position ? answer : _answers[i];
-      if (grade == null || grade == GameAnswer.almost) continue;
-      success = ((success ?? 5) + (grade == GameAnswer.knew ? 1 : -1)).clamp(
-        1,
-        10,
-      );
-    }
-    return success;
+  RowSaveData resultForAnswer(GameAnswer answer) {
+    final previous = currentAnswer;
+    final saved = current!.results;
+    int adjust(GameAnswer category, int count) =>
+        count - (previous == category ? 1 : 0) + (answer == category ? 1 : 0);
+    return RowSaveData(
+      rowOrder: saved.rowOrder,
+      revealed: saved.revealed,
+      importance: saved.importance,
+      failedCount: adjust(GameAnswer.failed, saved.failedCount),
+      almostCount: adjust(GameAnswer.almost, saved.almostCount),
+      successCount: adjust(GameAnswer.knew, saved.successCount),
+    );
   }
 
   void goBack() {
@@ -184,31 +249,25 @@ class GameSession {
     if (canGoForward) _position++;
   }
 
-  GameSession({required this.entries, required this.settings, Random? random})
-    : random = random ?? Random() {
-    if (settings.questionCount != null && settings.questionCount! < 1) {
-      throw ArgumentError('Question count must be positive.');
-    }
-    if (entries.isNotEmpty) _next();
+  void reviewHistory() {
+    if (_history.isEmpty) return;
+    _completed = false;
+    _position = 0;
   }
 
-  int get answered => results.values.fold(0, (total, count) => total + count);
-  int? get total => settings.questionCount == null
-      ? null
-      : min(settings.questionCount!, entries.length);
-  bool get finished => current == null;
+  void showSummary() {
+    if (roundComplete) _completed = true;
+  }
 
   void answer(GameAnswer answer) {
     if (finished) return;
     final previous = currentAnswer;
+    current!.results = resultForAnswer(answer);
     _answers[_position] = answer;
-    if (previous != null) {
-      results[previous] = results[previous]! - 1;
-      results[answer] = results[answer]! + 1;
-      return;
-    }
+    if (previous != null) results[previous] = results[previous]! - 1;
     results[answer] = results[answer]! + 1;
-    if (total != null && answered >= total!) {
+    if (previous != null) return;
+    if (answered >= total || _remaining.isEmpty) {
       _completed = true;
     } else {
       _next();
@@ -216,27 +275,30 @@ class GameSession {
   }
 
   void _next() {
-    if (settings.questionCount == null) _remaining.clear();
-    if (_remaining.isEmpty) _remaining.addAll(entries);
+    if (_remaining.isEmpty) {
+      _completed = true;
+      return;
+    }
+    final poolWeight = _remaining.fold<int>(
+      0,
+      (sum, entry) => sum + selectionWeight(entry),
+    );
+    final mean = poolWeight / _remaining.length;
+    final sum = settings.weighted ? poolWeight : 0;
     var index = 0;
-    final weights = settings.weighted
-        ? _remaining.map(selectionWeight).toList()
-        : <double>[];
-    final sum = weights.fold<double>(0, (sum, weight) => sum + weight);
     if (sum > 0) {
       var ticket = random.nextDouble() * sum;
       for (; index < _remaining.length - 1; index++) {
-        ticket -= weights[index];
+        ticket -= selectionWeight(_remaining[index]);
         if (ticket < 0) break;
       }
     } else {
       index = random.nextInt(_remaining.length);
     }
-    _history.add(_remaining.removeAt(index));
+    final selected = _remaining.removeAt(index);
+    _selectionMeans[selected] = mean;
+    _history.add(selected);
     _answers.add(null);
-    final entry = _history.last;
-    if (_shown.add((entry.table.name, entry.key))) entry.appeared++;
-    _initialSuccess.putIfAbsent(entry, () => entry.personalSuccess);
     _position = _history.length - 1;
   }
 }

@@ -1,66 +1,75 @@
-// Paste this into Extensions > Apps Script in your personal spreadsheet.
+// Paste into Extensions > Apps Script and keep your spreadsheet ID.
 const SPREADSHEET_ID = 'PASTE_YOUR_SPREADSHEET_ID_HERE';
-const TAB_NAME = 'Ratings';
-const HEADERS = ['Table', 'Entry', 'Importance', 'Success', 'Appered'];
+const TAB_NAME = 'Results';
+const HEADERS = ['Table', 'Entry', 'Appeared Count', 'Failed Count', 'Almost Count', 'Success Count', 'Importance'];
 
 function jsonResponse(value) {
-  return ContentService.createTextOutput(JSON.stringify(value))
-    .setMimeType(ContentService.MimeType.JSON);
+  return ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function count(value) {
+  if (value === '' || value == null) return 0;
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < 0) throw new Error('Counts must be nonnegative integers.');
+  return number;
+}
+
+function importance(value) {
+  if (value === '' || value == null) return null;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 0 || number > 10) throw new Error('Importance must be an integer from 0 to 10.');
+  return number;
+}
+
+function writeEntries(sheet, entries) {
+  const oldLastRow = sheet.getLastRow();
+  const literal = text => "'" + text;
+  const rows = [HEADERS, ...entries.map(item => [
+    literal(item.table), literal(item.entry), item.appearedCount,
+    item.failedCount, item.almostCount, item.successCount, item.importance ?? '',
+  ])];
+  if (sheet.getMaxRows() < rows.length) sheet.insertRowsAfter(sheet.getMaxRows(), rows.length - sheet.getMaxRows());
+  sheet.getRange(1, 1, rows.length, HEADERS.length).setValues(rows);
+  if (oldLastRow > rows.length) sheet.getRange(rows.length + 1, 1, oldLastRow - rows.length, HEADERS.length).clearContent();
+  sheet.setFrozenRows(1);
+  SpreadsheetApp.flush();
 }
 
 function ratingsSheet() {
   const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const sheet = spreadsheet.getSheetByName(TAB_NAME) ||
-    spreadsheet.insertSheet(TAB_NAME);
-  if (sheet.getMaxColumns() < HEADERS.length) {
-    sheet.insertColumnsAfter(sheet.getMaxColumns(),
-      HEADERS.length - sheet.getMaxColumns());
-  }
+  const sheet = spreadsheet.getSheetByName(TAB_NAME) || spreadsheet.insertSheet(TAB_NAME);
+  if (sheet.getMaxColumns() < HEADERS.length) sheet.insertColumnsAfter(sheet.getMaxColumns(), HEADERS.length - sheet.getMaxColumns());
   if (sheet.getLastRow() === 0) {
-    sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
-    sheet.setFrozenRows(1);
-    SpreadsheetApp.flush();
-  } else {
-    const actual = sheet.getRange(1, 1, 1, HEADERS.length)
-      .getDisplayValues()[0];
-    if (actual[4] === '' && HEADERS.slice(0, 4).every((header, index) => actual[index] === header)) {
-      sheet.getRange(1, 5, 1, 1).setValues([['Appered']]);
-      actual[4] = 'Appered';
-    }
-    if (!HEADERS.every((header, index) => actual[index] === header)) {
-      throw new Error('The existing Ratings tab has unexpected headers. ' +
-        'Rename that tab so a new Ratings tab can be created automatically.');
-    }
+    writeEntries(sheet, []);
+    return sheet;
   }
+  const actual = sheet.getRange(1, 1, 1, HEADERS.length).getDisplayValues()[0];
+  if (HEADERS.every((header, index) => actual[index] === header)) return sheet;
+  const legacy = ['Table', 'Entry', 'Importance', 'Success'];
+  if (!legacy.every((header, index) => actual[index] === header)) {
+    throw new Error('The Ratings tab has unexpected headers.');
+  }
+  // The old Success rating and shown count cannot reconstruct graded outcomes.
+  // Retain Importance overrides and start the outcome counters at zero.
+  const entries = sheet.getLastRow() < 2 ? [] : sheet.getRange(2, 1, sheet.getLastRow() - 1, 4).getDisplayValues()
+    .filter(row => row[0] !== '' && row[1] !== '' && row[2] !== '')
+    .map(row => ({table: row[0], entry: row[1], importance: importance(row[2]),
+      appearedCount: 0, failedCount: 0, almostCount: 0, successCount: 0}));
+  writeEntries(sheet, entries);
   return sheet;
-}
-
-function rating(value) {
-  if (value === '' || value === undefined || value === null) return null;
-  const number = Number(value);
-  if (!Number.isInteger(number) || number < 1 || number > 10) {
-    throw new Error('Importance and Success must be integers from 1 to 10.');
-  }
-  return number;
-}
-
-function appearanceCount(value) {
-  if (value === '' || value === undefined || value === null) return 0;
-  const number = Number(value);
-  if (!Number.isInteger(number) || number < 0) throw new Error('Appered must be a nonnegative integer.');
-  return number;
 }
 
 function readEntries(sheet) {
   if (sheet.getLastRow() < 2) return [];
-  return sheet.getRange(2, 1, sheet.getLastRow() - 1, 5)
-    .getDisplayValues()
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length).getDisplayValues()
     .filter(row => row[0] !== '' && row[1] !== '')
-    .map(row => ({
-      table: row[0], entry: row[1],
-      importance: rating(row[2]), success: rating(row[3]), appeared: appearanceCount(row[4]),
-    }))
-    .filter(item => item.importance != null || item.success != null || item.appeared > 0);
+    .map(row => {
+      const failedCount = count(row[3]);
+      const almostCount = count(row[4]);
+      const successCount = count(row[5]);
+      return {table: row[0], entry: row[1], importance: importance(row[6]),
+        appearedCount: failedCount + almostCount + successCount, failedCount, almostCount, successCount};
+    }).filter(item => item.importance != null || item.appearedCount > 0);
 }
 
 function doGet() {
@@ -69,8 +78,7 @@ function doGet() {
   try {
     lock.waitLock(30000);
     locked = true;
-    return jsonResponse({ok: true, version: 2,
-      entries: readEntries(ratingsSheet())});
+    return jsonResponse({ok: true, version: 3, entries: readEntries(ratingsSheet())});
   } catch (error) {
     return jsonResponse({ok: false, error: String(error.message || error)});
   } finally {
@@ -78,48 +86,34 @@ function doGet() {
   }
 }
 
-// Replaces the personal-results snapshot. Missing entries are removed.
 function doPost(event) {
   const lock = LockService.getScriptLock();
   let locked = false;
   try {
     const body = JSON.parse(event.postData.contents);
-    if (body.version !== 2 || body.mode !== 'replace' || !Array.isArray(body.entries)) {
-      throw new Error('Update the app and script: expected {version: 2, mode: "replace", entries: [...]}');
+    if (body.version !== 3 || body.mode !== 'replace' || !Array.isArray(body.entries)) {
+      throw new Error('Update the app and script to version 3 for question result counters.');
     }
     const incoming = body.entries.map(item => {
-      if (typeof item.table !== 'string' || !item.table.trim() ||
-          typeof item.entry !== 'string' || !item.entry.trim()) {
-        throw new Error('Each entry needs nonempty table and entry strings.');
+      if (typeof item.table !== 'string' || !item.table.trim() || typeof item.entry !== 'string' || !item.entry.trim()) {
+        throw new Error('Each result needs a table and entry.');
       }
-      return {table: item.table, entry: item.entry,
-        importance: rating(item.importance), success: rating(item.success), appeared: appearanceCount(item.appeared)};
+      const failedCount = count(item.failedCount);
+      const almostCount = count(item.almostCount);
+      const successCount = count(item.successCount);
+      const appearedCount = failedCount + almostCount + successCount;
+      if (count(item.appearedCount) !== appearedCount) throw new Error('Appeared Count must equal the sum of outcome counts.');
+      return {table: item.table, entry: item.entry, importance: importance(item.importance),
+        appearedCount, failedCount, almostCount, successCount};
+    });
+    const unique = new Map();
+    incoming.forEach(item => {
+      if (item.importance != null || item.appearedCount > 0) unique.set(JSON.stringify([item.table, item.entry]), item);
     });
     lock.waitLock(30000);
     locked = true;
-    const sheet = ratingsSheet();
-    const key = item => JSON.stringify([item.table, item.entry]);
-    const merged = new Map();
-    incoming.forEach(item => {
-      if (item.importance != null || item.success != null || item.appeared > 0) merged.set(key(item), item);
-    });
-    // The leading apostrophe keeps text literal, including entries starting '='.
-    const literal = text => "'" + text;
-    const rows = [HEADERS,
-      ...Array.from(merged.values(), item => [
-        literal(item.table), literal(item.entry), item.importance ?? '', item.success ?? '', item.appeared || '',
-      ])];
-    if (sheet.getMaxRows() < rows.length) {
-      sheet.insertRowsAfter(sheet.getMaxRows(), rows.length - sheet.getMaxRows());
-    }
-    sheet.getRange(1, 1, rows.length, 5).setValues(rows);
-    const oldLastRow = sheet.getLastRow();
-    if (oldLastRow > rows.length) {
-      sheet.getRange(rows.length + 1, 1, oldLastRow - rows.length, 5)
-        .clearContent();
-    }
-    SpreadsheetApp.flush();
-    return jsonResponse({ok: true, version: 2, updated: incoming.length, total: merged.size});
+    writeEntries(ratingsSheet(), Array.from(unique.values()));
+    return jsonResponse({ok: true, version: 3, total: unique.size});
   } catch (error) {
     return jsonResponse({ok: false, error: String(error.message || error)});
   } finally {

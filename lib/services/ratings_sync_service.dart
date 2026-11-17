@@ -67,9 +67,9 @@ class RatingsSyncService {
           decoded['error'] ?? 'The sync server rejected the request.',
         );
       }
-      if (decoded['version'] != 2) {
+      if (decoded['version'] != 3) {
         throw const FormatException(
-          'Update and redeploy personal-sync.gs to use personal results overrides.',
+          'Update and redeploy personal-sync.gs to use question result counters.',
         );
       }
       return decoded;
@@ -78,16 +78,9 @@ class RatingsSyncService {
     }
   }
 
-  static int appearanceCount(dynamic value) {
-    if (value == null || value == '') return 0;
-    if (value is! int || value < 0)
-      throw const FormatException('Appered must be a nonnegative integer.');
-    return value;
-  }
-
   Future<int> download(String url) => _enqueue(() async {
     final data = await _request(url);
-    if (data['version'] != 2 || data['entries'] is! List) {
+    if (data['version'] != 3 || data['entries'] is! List) {
       throw const FormatException('Unsupported sync data format.');
     }
     final updates = <String, Map<String, RowSaveData>>{};
@@ -105,34 +98,45 @@ class RatingsSyncService {
       int? rating(String field) {
         final value = item[field];
         if (value == null || value == '') return null;
-        if (value is! int || value < 1 || value > 10) {
-          throw FormatException('$field must be an integer from 1 to 10.');
+        if (value is! int || value < 0 || value > 10) {
+          throw FormatException('$field must be an integer from 0 to 10.');
         }
         return value;
       }
 
+      int count(String field) {
+        final value = item[field];
+        if (value == null || value == '') return 0;
+        if (value is! int || value < 0) {
+          throw FormatException('$field must be a nonnegative integer.');
+        }
+        return value;
+      }
+
+      final failedCount = count('failedCount');
+      final almostCount = count('almostCount');
+      final successCount = count('successCount');
+      final appearedCount = count('appearedCount');
+      if (appearedCount != failedCount + almostCount + successCount) {
+        throw const FormatException(
+          'Appeared Count must equal the sum of result counts.',
+        );
+      }
       (updates[item['table'] as String] ??= {})[item['entry']
           as String] = RowSaveData(
         rowOrder: 0,
         revealed: const [],
         importance: rating('importance'),
-        success: rating('success'),
-        appeared: appearanceCount(item['appeared']),
+        failedCount: failedCount,
+        almostCount: almostCount,
+        successCount: successCount,
       );
     }
     await storage.replacePersonalResults(updates);
     return updates.values.fold<int>(
       0,
       (count, rows) =>
-          count +
-          rows.values
-              .where(
-                (row) =>
-                    row.importance != null ||
-                    row.success != null ||
-                    row.appeared > 0,
-              )
-              .length,
+          count + rows.values.where((row) => row.hasPersonalResults).length,
     );
   });
 
@@ -145,23 +149,17 @@ class RatingsSyncService {
     final entries = <Map<String, dynamic>>[];
     for (final table in (await storage.loadPersonalResults()).entries) {
       for (final row in table.value.entries) {
-        if (row.key.trim().isEmpty ||
-            (row.value.importance == null &&
-                row.value.success == null &&
-                row.value.appeared == 0))
-          continue;
+        if (row.key.trim().isEmpty || !row.value.hasPersonalResults) continue;
         entries.add({
           'table': table.key,
           'entry': row.key,
-          'importance': row.value.importance,
-          'success': row.value.success,
-          if (row.value.appeared > 0) 'appeared': row.value.appeared,
+          ...row.value.toPersonalJson(),
         });
       }
     }
     await _request(
       url,
-      body: {'version': 2, 'mode': 'replace', 'entries': entries},
+      body: {'version': 3, 'mode': 'replace', 'entries': entries},
     );
     return entries.length;
   });

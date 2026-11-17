@@ -24,9 +24,17 @@ const table = KnowledgeTable(
 http.Response response(Object value) => http.Response(jsonEncode(value), 200);
 Map<String, dynamic> ratings() => {
   'ok': true,
-  'version': 2,
+  'version': 3,
   'entries': [
-    {'table': 'Words', 'entry': 'one', 'importance': 8, 'success': 3},
+    {
+      'table': 'Words',
+      'entry': 'one',
+      'importance': 8,
+      'failedCount': 2,
+      'almostCount': 1,
+      'successCount': 3,
+      'appearedCount': 6,
+    },
   ],
 };
 
@@ -41,17 +49,21 @@ void main() {
 
   test('download preserves study state and other rows', () async {
     final saved = (await storage.loadTableRowData('Words'))!;
-    saved['one'] = const RowSaveData(rowOrder: 4, revealed: [true], success: 5);
+    saved['one'] = const RowSaveData(
+      rowOrder: 4,
+      revealed: [true],
+      successCount: 5,
+    );
     await storage.saveTableRowData('Words', saved);
     final client = MockClient((_) async => response(ratings()));
     addTearDown(client.close);
     expect(await RatingsSyncService(client: client).download(url), 1);
     final updated = (await storage.loadTableRowData('Words'))!;
     expect(updated['one']!.importance, 8);
-    expect(updated['one']!.success, 3);
+    expect(updated['one']!.successCount, 3);
     expect(updated['one']!.rowOrder, 4);
     expect(updated['one']!.revealed, [true]);
-    expect(updated['two']!.success, isNull);
+    expect(updated['two']!.successCount, 0);
   });
 
   test('invalid response leaves all local ratings intact', () async {
@@ -59,7 +71,7 @@ void main() {
     (data['entries'] as List).add({
       'table': 'Words',
       'entry': 'two',
-      'success': 20,
+      'failedCount': -1,
     });
     final client = MockClient((_) async => response(data));
     addTearDown(client.close);
@@ -75,7 +87,11 @@ void main() {
 
   test('upload sends ratings only and follows Apps Script redirects', () async {
     final saved = (await storage.loadTableRowData('Words'))!;
-    saved['one'] = const RowSaveData(rowOrder: 0, revealed: [], success: 6);
+    saved['one'] = const RowSaveData(
+      rowOrder: 0,
+      revealed: [],
+      successCount: 6,
+    );
     await storage.saveTableRowData('Words', saved);
     var calls = 0;
     final client = MockClient((request) async {
@@ -83,9 +99,16 @@ void main() {
         expect(request.method, 'POST');
         expect(request.headers['content-type'], startsWith('text/plain'));
         final body = jsonDecode(request.body) as Map;
-        expect(body['version'], 2);
+        expect(body['version'], 3);
         expect(body['entries'], [
-          {'table': 'Words', 'entry': 'one', 'importance': null, 'success': 6},
+          {
+            'table': 'Words',
+            'entry': 'one',
+            'failedCount': 0,
+            'almostCount': 0,
+            'successCount': 6,
+            'appearedCount': 6,
+          },
         ]);
         return http.Response(
           '',
@@ -95,7 +118,7 @@ void main() {
       }
       expect(request.method, 'GET');
       expect(request.url.host, 'script.googleusercontent.com');
-      return response({'ok': true, 'version': 2});
+      return response({'ok': true, 'version': 3});
     });
     addTearDown(client.close);
     expect(await RatingsSyncService(client: client).upload(url), 1);
@@ -122,7 +145,7 @@ void main() {
       final client = MockClient((request) async {
         methods.add(request.method);
         return response(
-          request.method == 'GET' ? ratings() : {'ok': true, 'version': 2},
+          request.method == 'GET' ? ratings() : {'ok': true, 'version': 3},
         );
       });
       addTearDown(client.close);
@@ -169,7 +192,7 @@ void main() {
           methods.add(request.method);
           if (request.method == 'POST') {
             expect(jsonDecode(request.body)['entries'].first['importance'], 9);
-            return response({'ok': true, 'version': 2});
+            return response({'ok': true, 'version': 3});
           }
           return response(ratings());
         });
@@ -190,7 +213,7 @@ void main() {
         expect(methods, enabled ? ['GET', 'POST'] : isEmpty);
         expect(
           (await storage.loadTableRowData('Words'))!['one']!.importance,
-          enabled ? 9 : 6,
+          enabled ? 9 : 1,
         );
       },
     );

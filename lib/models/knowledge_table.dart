@@ -1,6 +1,16 @@
 import 'dart:convert';
 
 class KnowledgeTable {
+  static bool isSeparateLineColumn(String title) =>
+      title.trimRight().endsWith('*');
+
+  static String columnLabel(String title) {
+    final trimmed = title.trimRight();
+    return isSeparateLineColumn(title)
+        ? trimmed.substring(0, trimmed.length - 1).trimRight()
+        : title;
+  }
+
   final Map<String, int> importance;
   final String name;
   final String? sourceUrl;

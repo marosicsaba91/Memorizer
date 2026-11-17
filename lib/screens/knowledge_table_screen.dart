@@ -26,6 +26,7 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
   final ScrollController _tableScrollController = ScrollController();
 
   late List<String> _headers;
+  late Set<int> _separateLineColumns;
   late List<List<String>> _dataRows;
 
   /// Revealed state: _revealed[origRowIdx][origColIdx].
@@ -50,13 +51,12 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
 
   /// Per-row success: 1–10, default 5.
   late List<int> _successes;
-  late List<int> _appeared;
+  late List<RowSaveData> _results;
   late List<int> _importance;
   late List<int?> _importanceOverrides;
-  late List<int?> _successOverrides;
 
   int _defaultImportance(int index) =>
-      widget.table.importance[_rowKeyForIndex(index)] ?? 5;
+      widget.table.importance[_rowKeyForIndex(index)] ?? 0;
 
   late double _textSize;
   bool _lastSortRandomise = false;
@@ -119,8 +119,9 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
       rowData[_rowKeyForIndex(origIdx)] = RowSaveData(
         rowOrder: rowOrderByIndex[origIdx] ?? origIdx,
         revealed: List<bool>.from(_revealed[origIdx], growable: false),
-        success: _successOverrides[origIdx],
-        appeared: _appeared[origIdx],
+        failedCount: _results[origIdx].failedCount,
+        almostCount: _results[origIdx].almostCount,
+        successCount: _results[origIdx].successCount,
         importance: _importanceOverrides[origIdx],
       );
     }
@@ -158,7 +159,14 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
       }
     }
 
-    _headers = headers;
+    _separateLineColumns = {
+      for (var column = 0; column < headers.length; column++)
+        if (KnowledgeTable.isSeparateLineColumn(headers[column])) column,
+    };
+    _headers = List.generate(headers.length, (column) {
+      final label = KnowledgeTable.columnLabel(headers[column]);
+      return label.isEmpty ? 'Column ${column + 1}' : label;
+    });
     _dataRows = dataRows;
     _displayOrder = List.generate(_dataRows.length, (i) => i, growable: true);
     _columnOrder = List.generate(_numCols, (i) => i, growable: true);
@@ -174,15 +182,17 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
       growable: true,
     );
 
-    _appeared = List<int>.filled(_dataRows.length, 0);
+    _results = List.generate(
+      _dataRows.length,
+      (index) => RowSaveData(rowOrder: index, revealed: const []),
+    );
     _successes = List<int>.filled(_dataRows.length, 5);
     _importance = _dataRows
         .map(
-          (row) => widget.table.importance[row.isEmpty ? '' : row.first] ?? 5,
+          (row) => widget.table.importance[row.isEmpty ? '' : row.first] ?? 0,
         )
         .toList();
     _importanceOverrides = List<int?>.filled(_dataRows.length, null);
-    _successOverrides = List<int?>.filled(_dataRows.length, null);
     _textSize = widget.table.textSize ?? 14.0;
     _loadTextSize();
     _loadInitialOrderingPreferences();
@@ -240,10 +250,9 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
       if (rowSaveData == null) continue;
 
       rowOrders[origIdx] = rowSaveData.rowOrder;
-      _appeared[origIdx] = rowSaveData.appeared;
-      _successOverrides[origIdx] = rowSaveData.success;
+      _results[origIdx] = rowSaveData;
       _importanceOverrides[origIdx] = rowSaveData.importance;
-      successes[origIdx] = rowSaveData.success ?? 5;
+      successes[origIdx] = rowSaveData.successRating;
       importance[origIdx] =
           rowSaveData.importance ?? _defaultImportance(origIdx);
 
@@ -326,7 +335,7 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
               setState(() {
                 overrides[origRowIdx] = delta == null
                     ? null
-                    : (value + delta).clamp(1, 10);
+                    : (value + delta).clamp(0, 10);
                 values[origRowIdx] = overrides[origRowIdx] ?? defaultValue;
               });
               setDialogState(() {});
@@ -352,7 +361,7 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                   children: [
                     IconButton(
                       tooltip: 'Decrease $label',
-                      onPressed: value > 1 ? () => update(-1) : null,
+                      onPressed: value > 0 ? () => update(-1) : null,
                       icon: const Icon(Icons.remove),
                     ),
                     SizedBox(
@@ -392,8 +401,10 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                   _defaultImportance(origRowIdx),
                 ),
                 const SizedBox(height: 16),
-                ratingControl('Success', _successes, _successOverrides, 5),
-                Text('Appered: ${_appeared[origRowIdx]}'),
+                Text('Failed Count: ${_results[origRowIdx].failedCount}'),
+                Text('Almost Count: ${_results[origRowIdx].almostCount}'),
+                Text('Success Count: ${_results[origRowIdx].successCount}'),
+                Text('Appeared Count: ${_results[origRowIdx].appeared}'),
               ],
             ),
             actions: [
@@ -759,13 +770,10 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
                 final multilineColumns = <int>[];
                 for (var v = 0; v < _numCols; v++) {
                   final column = _columnOrder[v];
-                  final hasLineBreak = _dataRows.any(
-                    (row) =>
-                        column < row.length &&
-                        (row[column].contains('\n') ||
-                            row[column].contains('\r')),
-                  );
-                  (hasLineBreak ? multilineColumns : inlineColumns).add(v);
+                  (_separateLineColumns.contains(column)
+                          ? multilineColumns
+                          : inlineColumns)
+                      .add(v);
                 }
                 final inlineFraction = inlineColumns.fold<double>(
                   0,

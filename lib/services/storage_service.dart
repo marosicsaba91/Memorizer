@@ -189,7 +189,6 @@ class StorageService {
       migrated[_rowKeyFromRow(rows[i])] = RowSaveData(
         rowOrder: rowPositionByIndex[i] ?? i,
         revealed: i < revealedByIndex.length ? revealedByIndex[i] : const [],
-        success: i < difficulties.length ? difficulties[i].clamp(1, 10) : null,
       );
     }
     return migrated;
@@ -295,14 +294,13 @@ class StorageService {
           continue;
         changed = true;
         final importance = value.remove('importance');
-        final success = value.remove('success') ?? value.remove('difficulty');
+        value.remove('success');
         value.remove('difficulty');
         if (!personal.containsKey(row.key)) {
           final overrides = <String, dynamic>{
             if (importance is int &&
-                importance != (table?.importance[row.key] ?? 5))
-              'importance': importance.clamp(1, 10),
-            if (success is int && success != 5) 'success': success.clamp(1, 10),
+                importance != (table?.importance[row.key] ?? 0))
+              'importance': importance.clamp(0, 10),
           };
           if (overrides.isNotEmpty) personal[row.key] = overrides;
         }
@@ -322,14 +320,25 @@ class StorageService {
     final prefs = await SharedPreferences.getInstance();
     await _migratePersonalResults(prefs);
     final result = <String, Map<String, RowSaveData>>{};
-    for (final key in prefs.getKeys().where(
-      (key) => key.startsWith(_personalPrefix),
-    )) {
+    for (final key
+        in prefs
+            .getKeys()
+            .where((key) => key.startsWith(_personalPrefix))
+            .toList()) {
       final rows = jsonDecode(prefs.getString(key)!) as Map<String, dynamic>;
-      result[key.substring(_personalPrefix.length)] = rows.map(
+      final name = key.substring(_personalPrefix.length);
+      result[name] = rows.map(
         (name, value) =>
             MapEntry(name, RowSaveData.fromJson(value as Map<String, dynamic>)),
       );
+      if (rows.values.any(
+        (value) =>
+            (value as Map).containsKey('success') ||
+            value.containsKey('appeared') ||
+            value.containsKey('difficulty'),
+      )) {
+        await _savePersonalTable(name, result[name]!);
+      }
     }
     return result;
   }
@@ -341,15 +350,7 @@ class StorageService {
     final prefs = await SharedPreferences.getInstance();
     final personal = <String, dynamic>{
       for (final row in rows.entries)
-        if (row.value.importance != null ||
-            row.value.success != null ||
-            row.value.appeared > 0)
-          row.key: {
-            if (row.value.importance != null)
-              'importance': row.value.importance,
-            if (row.value.success != null) 'success': row.value.success,
-            if (row.value.appeared > 0) 'appeared': row.value.appeared,
-          },
+        if (row.value.hasPersonalResults) row.key: row.value.toPersonalJson(),
     };
     if (personal.isEmpty) {
       await prefs.remove('$_personalPrefix$name');
@@ -419,8 +420,9 @@ class StorageService {
         rowOrder: study?.rowOrder ?? result.length,
         revealed: study?.revealed ?? const [],
         importance: row.value.importance,
-        success: row.value.success,
-        appeared: row.value.appeared,
+        failedCount: row.value.failedCount,
+        almostCount: row.value.almostCount,
+        successCount: row.value.successCount,
       );
     }
     return result;

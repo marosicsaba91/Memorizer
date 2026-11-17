@@ -45,9 +45,10 @@ class SheetsService {
         if (headers[column].trim().toLowerCase() != 'importance') continue;
         for (final row in limitedRows.skip(1)) {
           if (row.isEmpty) continue;
-          importance[row.first] =
-              (column < row.length ? int.tryParse(row[column].trim()) ?? 5 : 5)
-                  .clamp(1, 10);
+          final value = column < row.length
+              ? int.tryParse(row[column].trim())
+              : null;
+          if (value != null) importance[row.first] = value.clamp(0, 10);
         }
       }
     }

@@ -44,50 +44,50 @@ function endpoint() {
   });
   vm.runInContext(fs.readFileSync('docs/personal-sync.gs', 'utf8'), context);
   return { rows, get: () => context.doGet(), post: entries => context.doPost({
-    postData: { contents: JSON.stringify({ version: 2, mode: 'replace', entries }) },
+    postData: { contents: JSON.stringify({ version: 3, mode: 'replace', entries }) },
   }) };
 }
 
-test('creates columns and keeps unset ratings blank', () => {
+function result(values = {}) {
+  const item = {table: 'Words', entry: 'one', failedCount: 0, almostCount: 0, successCount: 0, ...values};
+  return {...item, appearedCount: item.failedCount + item.almostCount + item.successCount};
+}
+
+test('creates counter columns and keeps Importance blank when unset', () => {
   const api = endpoint();
-  assert.deepEqual(api.get(), { ok: true, version: 2, entries: [] });
-  assert.deepEqual(api.rows[0], ['Table', 'Entry', 'Importance', 'Success', 'Appered']);
-  assert.equal(api.post([{ table: 'Words', entry: '=one', success: 8 }]).ok, true);
-  assert.deepEqual(api.rows[1], ['Words', '=one', '', 8, '']);
-  assert.deepEqual(api.get().entries, [{ table: 'Words', entry: '=one', importance: null, success: 8, appeared: 0 }]);
+  assert.deepEqual(api.get(), {ok: true, version: 3, entries: []});
+  assert.deepEqual(api.rows[0], ['Table', 'Entry', 'Appeared Count', 'Failed Count', 'Almost Count', 'Success Count', 'Importance']);
+  assert.equal(api.post([result({entry: '=one', failedCount: 2, almostCount: 3, successCount: 4})]).ok, true);
+  assert.deepEqual(api.rows[1], ['Words', '=one', 9, 2, 3, 4, '']);
+  assert.deepEqual(api.get().entries, [result({entry: '=one', importance: null, failedCount: 2, almostCount: 3, successCount: 4})]);
 });
 
-test('resetting both fields and replacing with an empty snapshot removes rows', () => {
+test('resetting Importance retains counters and an empty snapshot clears results', () => {
   const api = endpoint();
-  api.post([{ table: 'Words', entry: 'one', importance: 3, success: 8 },
-    { table: 'Words', entry: 'two', importance: 9 }]);
-  api.post([{ table: 'Words', entry: 'one', importance: null, success: 8, appeared: 0 },
-    { table: 'Words', entry: 'two', importance: null, success: null }]);
-  assert.deepEqual(api.get().entries, [{ table: 'Words', entry: 'one', importance: null, success: 8, appeared: 0 }]);
+  api.post([result({importance: 3, successCount: 8}), result({entry: 'two', importance: 0})]);
+  api.post([result({importance: null, successCount: 8}), result({entry: 'two', importance: null})]);
+  assert.deepEqual(api.get().entries, [result({importance: null, successCount: 8})]);
   api.post([]);
   assert.deepEqual(api.get().entries, []);
   assert.equal(api.rows.slice(1).every(row => row.every(value => value === '')), true);
 });
 
-test('invalid uploads preserve the previous snapshot', () => {
+test('negative and inconsistent counts leave the old snapshot intact', () => {
   const api = endpoint();
-  api.post([{ table: 'Words', entry: 'one', success: 8 }]);
-  assert.equal(api.post([{ table: 'Words', entry: 'one', success: 11 }]).ok, false);
-  assert.equal(api.get().entries[0].success, 8);
+  api.post([result({successCount: 8})]);
+  assert.equal(api.post([result({failedCount: -1})]).ok, false);
+  assert.equal(api.post([{...result({successCount: 2}), appearedCount: 20}]).ok, false);
+  assert.equal(api.get().entries[0].successCount, 8);
 });
 
- test('appearance-only results round trip and invalid counts preserve data', () => {
-  const api = endpoint();
-  assert.equal(api.post([{table: 'Words', entry: 'one', appeared: 7}]).ok, true);
-  assert.equal(api.get().entries[0].appeared, 7);
-  assert.equal(api.post([{table: 'Words', entry: 'one', appeared: -1}]).ok, false);
-  assert.equal(api.get().entries[0].appeared, 7);
- });
- test('existing four-column sheets gain the appearance column', () => {
-  const api = endpoint();
-  api.get();
-  api.rows[0].pop();
-  api.rows.push(['Words', 'one', '', 8]);
-  assert.equal(api.get().entries[0].appeared, 0);
-  assert.equal(api.rows[0][4], 'Appered');
- });
+test('legacy four and five column sheets migrate Importance without fabricating outcomes', () => {
+  for (const headers of [['Table', 'Entry', 'Importance', 'Success'], ['Table', 'Entry', 'Importance', 'Success', 'Appered']]) {
+    const api = endpoint();
+    api.get();
+    api.rows[0] = headers;
+    api.rows.push(['Words', 'one', 8, 9, 12]);
+    api.rows.push(['Words', 'two', '', 7, 5]);
+    assert.deepEqual(api.get().entries, [result({importance: 8})]);
+    assert.equal(api.rows[0].length, 7);
+  }
+});

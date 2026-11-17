@@ -141,7 +141,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Sync Importance and Success across devices. Leave the URL empty to use local storage only.',
+                'Sync question results and personal Importance across devices. Leave the URL empty to use local storage only.',
               ),
               const SizedBox(height: 20),
               TextField(
@@ -161,7 +161,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Enable autosync'),
                 subtitle: const Text(
-                  'Download when the app starts. Upload after each Importance or Success change.',
+                  'Download when the app starts. Upload after each recorded result or Importance change.',
                 ),
                 value: _autoSync,
                 onChanged: _busy

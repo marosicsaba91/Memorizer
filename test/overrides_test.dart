@@ -33,93 +33,62 @@ void main() {
   });
 
   testWidgets(
-    'personal Importance wins and Success 5 is neutral despite old table metadata',
+    'resetting Importance retains graded results and restores table default',
     (tester) async {
-      final cached = KnowledgeTable.fromJson({
-        ...table.toJson(),
-        'success': {'one': 10},
-      });
       await storage.saveTableRowData('Defaults', {
-        'one': const RowSaveData(rowOrder: 0, revealed: [], importance: 8),
+        'one': const RowSaveData(
+          rowOrder: 2,
+          revealed: [true],
+          importance: 8,
+          failedCount: 1,
+          almostCount: 2,
+          successCount: 3,
+        ),
       });
       await tester.pumpWidget(
-        MaterialApp(home: KnowledgeTableScreen(table: cached)),
+        const MaterialApp(home: KnowledgeTableScreen(table: table)),
       );
       await tester.pumpAndSettle();
-      Color? rowColor() =>
-          (tester
-                      .widgetList<Table>(find.byType(Table))
-                      .expand((table) => table.children)
-                      .firstWhere((row) => row.key == const ValueKey(0))
-                      .decoration
-                  as BoxDecoration)
-              .color;
-      expect(rowColor(), const Color(0xffffffff));
       await tester.tap(find.text('1'));
       await tester.pumpAndSettle();
       expect(find.text('8'), findsOneWidget);
-      expect(find.text('Reset to: 3'), findsOneWidget);
-      expect(find.text('Reset to: 5'), findsOneWidget);
-      await tester.tap(find.byTooltip('Increase Success'));
+      await tester.tap(find.text('Reset to: 3'));
       await tester.pumpAndSettle();
-      expect(rowColor(), isNot(const Color(0xffffffff)));
-      await tester.tap(find.text('Reset to: 5'));
-      await tester.pumpAndSettle();
-      expect(rowColor(), const Color(0xffffffff));
-      final personal = (await storage
-          .loadPersonalResults())['Defaults']!['one']!;
-      expect(personal.importance, 8);
-      expect(personal.success, isNull);
+      final saved = (await storage.loadPersonalResults())['Defaults']!['one']!;
+      expect(saved.importance, isNull);
+      expect(saved.failedCount, 1);
+      expect(saved.almostCount, 2);
+      expect(saved.successCount, 3);
+      expect(saved.appeared, 6);
+      expect(find.text('3'), findsOneWidget);
     },
   );
 
-  testWidgets('reset removes each override and restores source defaults', (
-    tester,
-  ) async {
-    var changes = 0;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: KnowledgeTableScreen(
-          table: table,
-          onRatingsChanged: () async {
-            changes++;
-          },
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(await storage.loadPersonalResults(), isEmpty);
-    await tester.tap(find.text('1'));
-    await tester.pumpAndSettle();
-    expect(find.text('Reset to: 3'), findsOneWidget);
-    expect(find.text('Reset to: 5'), findsOneWidget);
-    await tester.tap(find.byTooltip('Increase Success'));
-    await tester.pumpAndSettle();
-    var personal = await storage.loadPersonalResults();
-    expect(personal['Defaults']!['one']!.importance, isNull);
-    expect(personal['Defaults']!['one']!.success, 6);
-    await tester.tap(find.byTooltip('Increase Importance'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Reset to: 3'));
-    await tester.pumpAndSettle();
-    personal = await storage.loadPersonalResults();
-    expect(personal['Defaults']!['one']!.importance, isNull);
-    expect(personal['Defaults']!['one']!.success, 6);
-    expect(find.text('3'), findsOneWidget);
-    await tester.tap(find.text('Reset to: 5'));
-    await tester.pumpAndSettle();
-    expect(await storage.loadPersonalResults(), isEmpty);
-    expect(changes, 4);
-    final prefs = await SharedPreferences.getInstance();
-    expect(prefs.containsKey('personal_results/Defaults'), isFalse);
-    expect(prefs.containsKey('row_data/Defaults'), isTrue);
-  });
-
   test(
-    'new source defaults apply without creating personal overrides',
+    'an entry with only an Importance override is deleted when reset',
     () async {
       await storage.saveTableRowData('Defaults', {
-        'one': const RowSaveData(rowOrder: 0, revealed: [true], success: 8),
+        'one': const RowSaveData(rowOrder: 0, revealed: [], importance: 8),
+      });
+      await storage.saveTableRowData('Defaults', {
+        'one': const RowSaveData(rowOrder: 0, revealed: []),
+      });
+      expect(await storage.loadPersonalResults(), isEmpty);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.containsKey('personal_results/Defaults'), isFalse);
+      expect(prefs.containsKey('row_data/Defaults'), isTrue);
+    },
+  );
+
+  test(
+    'source refresh retains counts and applies updated global Importance',
+    () async {
+      await storage.saveTableRowData('Defaults', {
+        'one': const RowSaveData(
+          rowOrder: 2,
+          revealed: [true],
+          successCount: 8,
+        ),
       });
       const updated = KnowledgeTable(
         name: 'Defaults',
@@ -132,91 +101,91 @@ void main() {
       await storage.saveKnowledgeTables([updated]);
       final row = (await storage.loadTableRowData('Defaults'))!['one']!;
       expect(row.importance, isNull);
-      expect(row.success, 8);
+      expect(row.successCount, 8);
       expect(row.revealed, [true]);
       expect((await storage.loadKnowledgeTables()).first.importance['one'], 7);
     },
   );
 
   test(
-    'migrates old saved defaults without turning them into overrides',
+    'legacy results preserve Importance without inferring historical outcomes',
     () async {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
-        'row_data/Defaults',
+        'personal_results/Defaults',
         jsonEncode({
-          'one': {
-            'rowOrder': 2,
-            'revealed': [true],
-            'importance': 3,
-            'success': 9,
-          },
+          'one': {'importance': 8, 'success': 9, 'appeared': 12},
         }),
       );
       final row = (await storage.loadTableRowData('Defaults'))!['one']!;
-      expect(row.importance, isNull);
-      expect(row.success, 9);
-      expect(row.rowOrder, 2);
-      expect(row.revealed, [true]);
-      expect(jsonDecode(prefs.getString('personal_results/Defaults')!), {
-        'one': {'success': 9},
-      });
+      expect(row.importance, 8);
+      expect(row.appeared, 0);
+      final actual =
+          jsonDecode(prefs.getString('personal_results/Defaults')!)['one']
+              as Map;
+      expect(actual.containsKey('success'), isFalse);
+      expect(actual.containsKey('appeared'), isFalse);
+      expect(actual['appearedCount'], 0);
     },
   );
 
-  test(
-    'blank download clears overrides; empty snapshot removes old entries',
-    () async {
-      await storage.saveTableRowData('Defaults', {
-        'one': const RowSaveData(
-          rowOrder: 2,
-          revealed: [true],
-          importance: 8,
-          success: 9,
-        ),
-      });
-      var entries = <Map<String, dynamic>>[
-        {'table': 'Defaults', 'entry': 'one', 'importance': '', 'success': 6},
-      ];
-      final client = MockClient(
-        (_) async => http.Response(
-          jsonEncode({'ok': true, 'version': 2, 'entries': entries}),
-          200,
-        ),
-      );
-      addTearDown(client.close);
-      final sync = RatingsSyncService(client: client);
-      await sync.download(url);
-      var row = (await storage.loadTableRowData('Defaults'))!['one']!;
-      expect(row.importance, isNull);
-      expect(row.success, 6);
-      entries = [];
-      await sync.download(url);
-      expect(await storage.loadPersonalResults(), isEmpty);
-      row = (await storage.loadTableRowData('Defaults'))!['one']!;
-      expect(row.importance, isNull);
-      expect(row.success, isNull);
-      expect(row.rowOrder, 2);
-      expect(row.revealed, [true]);
-    },
-  );
+  test('download replaces counters while retaining study state', () async {
+    await storage.saveTableRowData('Defaults', {
+      'one': const RowSaveData(
+        rowOrder: 2,
+        revealed: [true],
+        importance: 8,
+        successCount: 9,
+      ),
+    });
+    var entries = <Map<String, dynamic>>[
+      {
+        'table': 'Defaults',
+        'entry': 'one',
+        'importance': '',
+        'failedCount': 1,
+        'almostCount': 2,
+        'successCount': 3,
+        'appearedCount': 6,
+      },
+    ];
+    final client = MockClient(
+      (_) async => http.Response(
+        jsonEncode({'ok': true, 'version': 3, 'entries': entries}),
+        200,
+      ),
+    );
+    addTearDown(client.close);
+    final sync = RatingsSyncService(client: client);
+    await sync.download(url);
+    var row = (await storage.loadTableRowData('Defaults'))!['one']!;
+    expect(row.importance, isNull);
+    expect(row.appeared, 6);
+    entries = [];
+    await sync.download(url);
+    expect(await storage.loadPersonalResults(), isEmpty);
+    row = (await storage.loadTableRowData('Defaults'))!['one']!;
+    expect(row.appeared, 0);
+    expect(row.rowOrder, 2);
+    expect(row.revealed, [true]);
+  });
 
   test(
-    'empty upload sends a replacement snapshot and rejects old endpoints',
+    'empty upload replaces the remote snapshot and old endpoints are rejected',
     () async {
       final client = MockClient((request) async {
         expect(jsonDecode(request.body), {
-          'version': 2,
+          'version': 3,
           'mode': 'replace',
           'entries': [],
         });
-        return http.Response(jsonEncode({'ok': true, 'version': 2}), 200);
+        return http.Response(jsonEncode({'ok': true, 'version': 3}), 200);
       });
       addTearDown(client.close);
       expect(await RatingsSyncService(client: client).upload(url), 0);
       final old = MockClient(
         (_) async => http.Response(
-          jsonEncode({'ok': true, 'version': 1, 'entries': []}),
+          jsonEncode({'ok': true, 'version': 2, 'entries': []}),
           200,
         ),
       );
@@ -229,7 +198,7 @@ void main() {
   );
 
   testWidgets(
-    'clear local personal results keeps tables, settings and study state',
+    'clearing local results clears all counters and preserves settings and study state',
     (tester) async {
       await storage.saveProfileSettings(
         const ProfileSettings(syncUrl: url, autoSync: true),
@@ -239,7 +208,9 @@ void main() {
           rowOrder: 2,
           revealed: [true],
           importance: 9,
-          success: 8,
+          failedCount: 2,
+          almostCount: 1,
+          successCount: 8,
         ),
       });
       final client = MockClient(
@@ -267,7 +238,7 @@ void main() {
       expect(row.rowOrder, 2);
       expect(row.revealed, [true]);
       expect(row.importance, isNull);
-      expect(row.success, isNull);
+      expect(row.appeared, 0);
     },
   );
 }

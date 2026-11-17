@@ -32,7 +32,6 @@ class _GameScreenState extends State<GameScreen> {
   GameSession? _session;
   List<bool> _revealed = [];
   final Map<int, List<bool>> _questionReveals = {};
-  final Set<(String, String)> _persistedAppearances = {};
   bool _loading = true;
   bool _saving = false;
   bool _allowPop = false;
@@ -63,7 +62,6 @@ class _GameScreenState extends State<GameScreen> {
       if (!mounted) return;
       setState(() {
         _questionReveals.clear();
-        _persistedAppearances.clear();
         _session = GameSession(
           entries: entries,
           settings: widget.settings,
@@ -71,7 +69,6 @@ class _GameScreenState extends State<GameScreen> {
         );
         _prepareQuestion();
       });
-      await _persistShown();
     } catch (error) {
       if (mounted) setState(() => _error = 'Could not start game: $error');
     } finally {
@@ -103,25 +100,17 @@ class _GameScreenState extends State<GameScreen> {
     });
   }
 
-  Future<void> _persistShown() async {
-    final entry = _session?.current;
-    if (entry == null ||
-        _persistedAppearances.contains((entry.table.name, entry.key)))
-      return;
-    await _persist(entry);
-    _persistedAppearances.add((entry.table.name, entry.key));
-    unawaited(_notifyChanged());
-  }
-
-  Future<void> _persist(GameEntry entry) async {
+  Future<void> _persist(GameEntry entry, {RowSaveData? result}) async {
     final saved = await _storage.ensureTableRowData(entry.table);
     final previous = saved[entry.key];
+    final updated = result ?? entry.results;
     saved[entry.key] = RowSaveData(
       rowOrder: previous?.rowOrder ?? saved.length,
       revealed: previous?.revealed ?? const [],
-      importance: entry.personalImportance,
-      success: entry.personalSuccess,
-      appeared: entry.appeared,
+      importance: updated.importance,
+      failedCount: updated.failedCount,
+      almostCount: updated.almostCount,
+      successCount: updated.successCount,
     );
     await _storage.saveTableRowData(entry.table.name, saved);
   }
@@ -140,16 +129,18 @@ class _GameScreenState extends State<GameScreen> {
   Future<void> _changeImportance(int delta) async {
     if (_saving) return;
     final entry = _session!.current!;
-    final previous = entry.personalImportance;
+    final previous = entry.results;
     setState(() {
       _saving = true;
-      entry.personalImportance = (entry.importance + delta).clamp(1, 10);
+      entry.results = entry.results.withImportance(
+        (entry.importance + delta).clamp(0, 10),
+      );
     });
     try {
       await _persist(entry);
       unawaited(_notifyChanged());
     } catch (error) {
-      entry.personalImportance = previous;
+      entry.results = previous;
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not save Importance: $error')),
@@ -164,23 +155,17 @@ class _GameScreenState extends State<GameScreen> {
       return;
     }
     final entry = _session!.current!;
-    final previous = entry.personalSuccess;
     setState(() => _saving = true);
     try {
-      final success = _session!.successForAnswer(answer);
-      if (success != previous) {
-        entry.personalSuccess = success;
-        await _persist(entry);
-        unawaited(_notifyChanged());
-      }
+      final result = _session!.resultForAnswer(answer);
+      await _persist(entry, result: result);
+      unawaited(_notifyChanged());
       if (!mounted) return;
       setState(() {
         _session!.answer(answer);
         _prepareQuestion();
       });
-      await _persistShown();
     } catch (error) {
-      entry.personalSuccess = previous;
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not save result: $error')),
@@ -214,6 +199,142 @@ class _GameScreenState extends State<GameScreen> {
     );
     _exitDialogOpen = false;
     if (exit == true && mounted) _backToMain();
+  }
+
+  void _showQuestionInfo() {
+    final session = _session!;
+    final entry = session.current!;
+    final weight = session.weightDetails(entry);
+    final mean = session.meanWeight(entry);
+    final meanLabel = mean > 0 && mean < 0.01
+        ? mean.toStringAsPrecision(3)
+        : mean.toStringAsFixed(2);
+    final relativeWeight = session.relativeWeight(entry);
+    const formulas = {
+      'sd: Success Delta': 'sd = Success − Failed',
+      'as: Adjusted Success': 'as = max sd − sd',
+      'aa: Adjusted Appearance': 'aa = max a − Appeared',
+    };
+    Widget values(List<(String, String)> rows) => Table(
+      columnWidths: const {0: FlexColumnWidth(), 1: IntrinsicColumnWidth()},
+      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+      children: rows
+          .expand(
+            (row) => [
+              if (formulas[row.$1] case final formula?)
+                TableRow(
+                  children: [
+                    Text(formula, style: Theme.of(context).textTheme.bodySmall),
+                    const SizedBox.shrink(),
+                  ],
+                ),
+              TableRow(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(0, 1, 12, 1),
+                    child: Text(row.$1),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 1),
+                    child: Text(
+                      row.$2,
+                      textAlign: TextAlign.end,
+                      softWrap: false,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          )
+          .toList(),
+    );
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Question info'),
+        titlePadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+        contentPadding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+        actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+        content: SizedBox(
+          width: 440,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                values([
+                  (
+                    'In-table Importance',
+                    '${entry.table.importance[entry.key] ?? 0}',
+                  ),
+                  (
+                    'Overridden Importance',
+                    entry.personalImportance?.toString() ?? 'Unset',
+                  ),
+                  ('Failed', '${entry.failedCount}'),
+                  ('Almost', '${entry.almostCount}'),
+                  ('Success', '${entry.successCount}'),
+                  ('Appeared', '${entry.appeared}'),
+                ]),
+                const SizedBox(height: 4),
+                const Text(
+                  'Weight at round start',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                values([
+                  ('ui: Used Importance', '${weight.usedImportance}'),
+                  ('sd: Success Delta', '${weight.successDelta}'),
+                  ('max sd: Max Success Delta', '${weight.maxSuccessDelta}'),
+                  ('as: Adjusted Success', '${weight.adjustedSuccess}'),
+                  ('max a: Max Appearance', '${weight.maxAppeared}'),
+                  ('aa: Adjusted Appearance', '${weight.adjustedAppearance}'),
+                  ('iw: Importance Weight', '${weight.importanceWeight}'),
+                  ('sw: Success Weight', '${weight.successWeight}'),
+                  ('aw: Appearance Weight', '${weight.appearanceWeight}'),
+                ]),
+                const SizedBox(height: 4),
+                const Text('Weight = ui × iw + as × sw + aa × aw'),
+                const SizedBox(height: 2),
+                Text(
+                  'Weight = ${weight.usedImportance} × ${weight.importanceWeight} + ${weight.adjustedSuccess} × ${weight.successWeight} + ${weight.adjustedAppearance} × ${weight.appearanceWeight}',
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Weight = ${weight.total}',
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text('Mean Weight = $meanLabel'),
+                const SizedBox(height: 2),
+                Text(
+                  mean == 0
+                      ? 'Relative Weight = 1.00'
+                      : 'Relative Weight = ${weight.total} / $meanLabel = ${relativeWeight.toStringAsFixed(2)}',
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  mean == 0
+                      ? 'All remaining weights are zero, so each question has equal chance.'
+                      : 'Relative Weight shows how likely this question was to be selected compared with the average question in the pool at that draw.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (!widget.settings.weighted)
+                  const Text('Equal Chance is selected.'),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _backToMain() {
@@ -250,6 +371,14 @@ class _GameScreenState extends State<GameScreen> {
             'Result: ${session.answered == 0 ? 0 : (session.results[GameAnswer.knew]! * 100 / session.answered).round()}% knew',
           ),
           const SizedBox(height: 24),
+          OutlinedButton(
+            onPressed: () => setState(() {
+              session.reviewHistory();
+              _prepareQuestion();
+            }),
+            child: const Text('Review Questions'),
+          ),
+          const SizedBox(height: 8),
           FilledButton(onPressed: _newRound, child: const Text('New Round')),
           const SizedBox(height: 8),
           OutlinedButton(
@@ -280,7 +409,7 @@ class _GameScreenState extends State<GameScreen> {
               IconButton(
                 iconSize: 18,
                 tooltip: 'Decrease Importance',
-                onPressed: !_saving && entry.importance > 1
+                onPressed: !_saving && entry.importance > 0
                     ? () => _changeImportance(-1)
                     : null,
                 icon: const Icon(Icons.remove),
@@ -383,9 +512,23 @@ class _GameScreenState extends State<GameScreen> {
           ),
           title: Text(
             playing
-                ? 'Question ${session!.questionNumber}${session.total == null ? '' : ' / ${session.total}'}'
+                ? 'Question ${session!.questionNumber} / ${session.total}'
                 : 'Play',
           ),
+          actions: [
+            if (playing && widget.settings.weighted)
+              Text(
+                'RW=${session!.relativeWeight(session.current!).toStringAsFixed(2)}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            if (playing)
+              IconButton(
+                iconSize: 18,
+                tooltip: 'Question info',
+                onPressed: _showQuestionInfo,
+                icon: const Icon(Icons.info_outline),
+              ),
+          ],
         ),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
@@ -432,6 +575,11 @@ class _GameScreenState extends State<GameScreen> {
                         label: const Text('Next'),
                       ),
                     ],
+                  ),
+                if (playing && session!.roundComplete)
+                  TextButton(
+                    onPressed: () => setState(() => session.showSummary()),
+                    child: const Text('Back to Summary'),
                   ),
                 if (playing)
                   if (!_revealed.every((value) => value))

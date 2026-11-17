@@ -26,51 +26,240 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test(
-    'appearance count increases once per game, including infinite repeats and review',
-    () {
-      final entries = GameEntry.fromTable(words, {});
-      final game = GameSession(
-        entries: [entries.first],
-        settings: const GameSettings(questionCount: null),
-      );
-      expect(entries.first.appeared, 1);
-      for (var i = 0; i < 5; i++) game.answer(GameAnswer.almost);
-      game.goBack();
-      game.goForward();
-      expect(entries.first.appeared, 1);
-      GameSession(entries: [entries.first], settings: const GameSettings());
-      expect(entries.first.appeared, 2);
-      expect(entries.skip(1).map((entry) => entry.appeared), everyElement(0));
-    },
-  );
-
-  test(
-    'appearance weighting normalizes min and max and handles equal counts',
+    'appearances count only graded outcomes and regrading changes the outcome',
     () {
       final entries = GameEntry.fromTable(words, {});
       final game = GameSession(
         entries: entries,
-        settings: const GameSettings(
-          weighted: true,
-          importanceWeight: 0,
-          lowSuccessWeight: 0,
-          lowAppearanceWeight: 8,
+        settings: const GameSettings(),
+      );
+      final first = game.current!;
+      expect(first.appeared, 0);
+      game.answer(GameAnswer.failed);
+      expect(first.appeared, 1);
+      expect(first.failedCount, 1);
+      expect(game.current!.appeared, 0);
+      game.goBack();
+      game.answer(GameAnswer.knew);
+      expect(first.failedCount, 0);
+      expect(first.successCount, 1);
+      expect(first.appeared, 1);
+      game.answer(GameAnswer.knew);
+      expect(first.appeared, 1);
+    },
+  );
+
+  test('weights use fixed round-start maxima and the requested components', () {
+    final entries = GameEntry.fromTable(words, {
+      'alpha': const RowSaveData(
+        rowOrder: 0,
+        revealed: [],
+        importance: 9,
+        failedCount: 3,
+        successCount: 10,
+      ),
+      'beta': const RowSaveData(
+        rowOrder: 1,
+        revealed: [],
+        failedCount: 7,
+        successCount: 1,
+      ),
+    });
+    final game = GameSession(
+      entries: entries,
+      settings: const GameSettings(
+        weighted: true,
+        importanceWeight: 2,
+        lowSuccessWeight: 3,
+        lowAppearanceWeight: 4,
+      ),
+    );
+    final detail = game.weightDetails(entries.first);
+    expect(detail.successDelta, 7);
+    expect(detail.maxSuccessDelta, 7);
+    expect(detail.adjustedSuccess, 0);
+    expect(detail.maxAppeared, 13);
+    expect(detail.adjustedAppearance, 0);
+    expect(detail.total, 9 * 2);
+    expect(game.selectionWeight(entries[1]), 3 * 2 + 13 * 3 + 5 * 4);
+    entries.first.results = entries.first.results.withImportance(1);
+    expect(game.weightDetails(entries.first).total, detail.total);
+  });
+
+  testWidgets(
+    'question info exposes counts and fixed weights and reviewing does not add appearances',
+    (tester) async {
+      const single = KnowledgeTable(
+        name: 'Single',
+        rows: [
+          ['Question'],
+          ['only'],
+        ],
+        importance: {'only': 3},
+      );
+      final storage = StorageService();
+      await storage.saveKnowledgeTables([single]);
+      var syncs = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: GameScreen(
+            tables: const [single],
+            settings: const GameSettings(questionCount: null, weighted: true),
+            onRatingsChanged: () async {
+              syncs++;
+            },
+          ),
         ),
       );
-      entries[0].appeared = 2;
-      entries[1].appeared = 6;
-      entries[2].appeared = 10;
-      expect(entries.map(game.selectionWeight), [8.0, 4.0, 1.0]);
-      for (final entry in entries) entry.appeared = 5;
-      expect(entries.map(game.selectionWeight), everyElement(8.0));
+      await tester.pumpAndSettle();
+      expect(find.text('Question 1 / 1'), findsOneWidget);
+      expect(find.text('RW=1.00'), findsOneWidget);
+      expect(await storage.loadPersonalResults(), isEmpty);
+      expect(syncs, 0);
+      await tester.tap(find.byTooltip('Question info'));
+      await tester.pumpAndSettle();
+      expect(find.text('In-table Importance'), findsOneWidget);
+      expect(find.text('Overridden Importance'), findsOneWidget);
+      final info = find.byType(AlertDialog);
       expect(
-        GameSettings.fromJson(game.settings.toJson()).lowAppearanceWeight,
-        8,
+        find.descendant(of: info, matching: find.text('Failed')),
+        findsOneWidget,
       );
+      expect(
+        find.descendant(of: info, matching: find.text('Almost')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: info, matching: find.text('Success')),
+        findsOneWidget,
+      );
+      expect(find.text('Appeared'), findsOneWidget);
+      expect(find.text('Weight = 3 × 1 + 0 × 2 + 0 × 0'), findsOneWidget);
+      expect(find.text('Weight = ui × iw + as × sw + aa × aw'), findsOneWidget);
+      final total = tester.widget<Text>(find.text('Weight = 3'));
+      expect(total.style!.fontWeight, FontWeight.bold);
+      expect(total.style!.fontSize, 24);
+      expect(find.text('Mean Weight = 3.00'), findsOneWidget);
+      expect(find.text('Relative Weight = 3 / 3.00 = 1.00'), findsOneWidget);
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Almost'));
+      await tester.pumpAndSettle();
+      expect(syncs, 1);
+      var saved = (await storage.loadPersonalResults())['Single']!['only']!;
+      expect(saved.appeared, 1);
+      expect(saved.almostCount, 1);
+      await tester.tap(find.text('Review Questions'));
+      await tester.pumpAndSettle();
+      expect(find.text('Question 1 / 1'), findsOneWidget);
+      saved = (await storage.loadPersonalResults())['Single']!['only']!;
+      expect(saved.appeared, 1);
+      expect(syncs, 1);
+      await tester.tap(find.text('Failed'));
+      await tester.pumpAndSettle();
+      saved = (await storage.loadPersonalResults())['Single']!['only']!;
+      expect(saved.failedCount, 1);
+      expect(saved.almostCount, 0);
+      expect(saved.appeared, 1);
+      expect(syncs, 2);
+      await tester.tap(find.text('Back to Summary'));
+      await tester.pumpAndSettle();
+      expect(find.text('Failed: 1'), findsOneWidget);
     },
   );
 
   late StorageService storage;
+  test(
+    'relative weight uses the selection pool mean and preserves it for history',
+    () {
+      final entries = GameEntry.fromTable(words, {}).take(2).toList();
+      entries.first.results = entries.first.results.withImportance(10);
+      entries.last.results = entries.last.results.withImportance(2);
+      final game = GameSession(
+        entries: entries,
+        random: Random(3),
+        settings: const GameSettings(weighted: true, lowSuccessWeight: 0),
+      );
+      final first = game.current!;
+      expect(game.meanWeight(first), 6);
+      expect(game.relativeWeight(first), game.selectionWeight(first) / 6);
+      game.answer(GameAnswer.almost);
+      final second = game.current!;
+      expect(game.meanWeight(second), game.selectionWeight(second));
+      expect(game.relativeWeight(second), 1);
+      game.goBack();
+      expect(game.meanWeight(game.current!), 6);
+      expect(
+        game.relativeWeight(game.current!),
+        game.selectionWeight(first) / 6,
+      );
+    },
+  );
+
+  test('all-zero pool has neutral relative weight', () {
+    final game = GameSession(
+      entries: GameEntry.fromTable(words, {}),
+      settings: const GameSettings(
+        weighted: true,
+        importanceWeight: 0,
+        lowSuccessWeight: 0,
+      ),
+    );
+    expect(game.meanWeight(game.current!), 0);
+    expect(game.relativeWeight(game.current!), 1);
+  });
+  testWidgets(
+    'game settings headings are bold and the dialog fits collapsed content',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await StorageService().saveGameSettings(
+        const GameSettings(questionCount: null),
+        10,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (_) => const GameSetupDialog(tables: [words]),
+                ),
+                child: const Text('Open settings'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open settings'));
+      await tester.pumpAndSettle();
+      for (final heading in [
+        'Question count',
+        'Included tables',
+        'Question selection',
+        'Automatically opened column',
+      ]) {
+        expect(
+          tester.widget<Text>(find.text(heading)).style!.fontWeight,
+          FontWeight.bold,
+        );
+      }
+      final panel = find
+          .ancestor(
+            of: find.text('Set up game'),
+            matching: find.byType(Material),
+          )
+          .first;
+      final collapsedHeight = tester.getSize(panel).height;
+      expect(collapsedHeight, lessThan(650));
+      await tester.tap(find.text('Aggregated'));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(panel).height, greaterThan(collapsedHeight));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     storage = StorageService();
@@ -78,25 +267,21 @@ void main() {
   });
 
   test(
-    'weighted selection uses personal ratings and the requested formula',
+    'missing Importance falls back to zero and personal overrides take precedence',
     () {
-      final entries = GameEntry.fromTable(words, {
-        'alpha': const RowSaveData(
-          rowOrder: 0,
-          revealed: [],
-          importance: 9,
-          success: 2,
-        ),
-      });
-      final game = GameSession(
-        entries: entries,
-        settings: const GameSettings(),
+      const source = KnowledgeTable(
+        name: 'No default',
+        rows: [
+          ['Q'],
+          ['first'],
+          ['second'],
+        ],
       );
-      expect(entries.first.importance, 9);
-      expect(game.selectionWeight(entries.first), 9 + (11 - 2) * 2);
-      expect(entries[1].importance, 3);
-      expect(entries[1].success, 5);
-      expect(game.selectionWeight(entries[1]), 15);
+      final entries = GameEntry.fromTable(source, {
+        'first': const RowSaveData(rowOrder: 0, revealed: [], importance: 8),
+      });
+      expect(entries.first.importance, 8);
+      expect(entries.last.importance, 0);
     },
   );
 
@@ -160,24 +345,29 @@ void main() {
     },
   );
 
-  test('regrading recalculates clamped ratings across repeated entries', () {
-    final entry = GameEntry.fromTable(words, {}).first;
-    entry.personalSuccess = 10;
-    final game = GameSession(
-      entries: [entry],
-      settings: const GameSettings(questionCount: null),
-    );
-    entry.personalSuccess = game.successForAnswer(GameAnswer.knew);
-    game.answer(GameAnswer.knew);
-    entry.personalSuccess = game.successForAnswer(GameAnswer.failed);
-    game.answer(GameAnswer.failed);
-    expect(entry.success, 9);
-    game.goBack();
-    game.goBack();
-    expect(game.successForAnswer(GameAnswer.failed), 8);
-    expect(game.successForAnswer(GameAnswer.almost), 9);
-    expect(game.successForAnswer(GameAnswer.knew), 9);
-  });
+  test(
+    'All exhausts the pool without duplicates and history remains reviewable',
+    () {
+      final game = GameSession(
+        entries: GameEntry.fromTable(words, {}),
+        settings: const GameSettings(questionCount: null),
+      );
+      final seen = <String>{};
+      while (!game.finished) {
+        expect(seen.add(game.current!.key), isTrue);
+        game.answer(GameAnswer.almost);
+      }
+      expect(game.total, 3);
+      expect(game.history.length, 3);
+      game.reviewHistory();
+      expect(game.questionNumber, 1);
+      expect(game.currentAnswer, GameAnswer.almost);
+      game.goForward();
+      expect(game.questionNumber, 2);
+      game.showSummary();
+      expect(game.finished, isTrue);
+    },
+  );
 
   testWidgets(
     'game setup automatically remembers choices across dialog openings',
@@ -208,8 +398,8 @@ void main() {
         '37',
       );
       await tester.pump();
-      await tester.ensureVisible(find.text('Infinite'));
-      await tester.tap(find.text('Infinite'));
+      await tester.ensureVisible(find.text('All').first);
+      await tester.tap(find.text('All').first);
       await tester.pump();
       await tester.tap(find.text('Selected'));
       await tester.pump();
@@ -217,8 +407,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Words'));
       await tester.pump();
-      await tester.ensureVisible(find.text('Aggregated Chance'));
-      await tester.tap(find.text('Aggregated Chance'));
+      await tester.ensureVisible(find.text('Aggregated'));
+      await tester.tap(find.text('Aggregated'));
       await tester.pumpAndSettle();
       final sliders = tester.widgetList<Slider>(find.byType(Slider)).toList();
       sliders[0].onChanged!(4);
@@ -253,8 +443,8 @@ void main() {
             .map((slider) => slider.value),
         [4.0, 7.0, 0.0],
       );
-      await tester.ensureVisible(find.text('Finite'));
-      await tester.tap(find.text('Finite'));
+      await tester.ensureVisible(find.text('Fixed'));
+      await tester.tap(find.text('Fixed'));
       await tester.pumpAndSettle();
       expect(
         tester
@@ -345,51 +535,25 @@ void main() {
     },
   );
 
-  test(
-    'component weights can be disabled and both zero fall back to equal chance',
-    () {
-      final entries = GameEntry.fromTable(words, {});
-      entries.first.personalImportance = 9;
-      entries.first.personalSuccess = 2;
-      expect(
-        GameSession(
-          entries: entries,
-          settings: const GameSettings(
-            importanceWeight: 10,
-            lowSuccessWeight: 0,
-          ),
-        ).selectionWeight(entries.first),
-        90,
-      );
-      expect(
-        GameSession(
-          entries: entries,
-          settings: const GameSettings(
-            importanceWeight: 0,
-            lowSuccessWeight: 10,
-          ),
-        ).selectionWeight(entries.first),
-        90,
-      );
-      final zero = GameSession(
-        entries: entries,
-        settings: const GameSettings(
-          questionCount: null,
-          weighted: true,
-          importanceWeight: 0,
-          lowSuccessWeight: 0,
-        ),
-        random: Random(1),
-      );
-      expect(entries.map(zero.selectionWeight), everyElement(1.0));
-      final seen = <String>{};
-      for (var i = 0; i < 100; i++) {
-        seen.add(zero.current!.key);
-        zero.answer(GameAnswer.almost);
-      }
-      expect(seen.length, 3);
-    },
-  );
+  test('zero weights still exhaust the pool using equal chance', () {
+    final entries = GameEntry.fromTable(words, {});
+    final game = GameSession(
+      entries: entries,
+      settings: const GameSettings(
+        weighted: true,
+        importanceWeight: 0,
+        lowSuccessWeight: 0,
+        lowAppearanceWeight: 0,
+      ),
+    );
+    expect(entries.map(game.selectionWeight), everyElement(0));
+    final seen = <String>{};
+    while (!game.finished) {
+      expect(seen.add(game.current!.key), isTrue);
+      game.answer(GameAnswer.almost);
+    }
+    expect(seen.length, 3);
+  });
 
   testWidgets(
     'question count accepts typing and steps by rounded ten percent',
@@ -475,8 +639,8 @@ void main() {
       );
       await tester.tap(find.text('Setup'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Aggregated Chance'));
-      await tester.tap(find.text('Aggregated Chance'));
+      await tester.ensureVisible(find.text('Aggregated'));
+      await tester.tap(find.text('Aggregated'));
       await tester.pumpAndSettle();
       final sliders = tester.widgetList<Slider>(find.byType(Slider)).toList();
       expect(sliders.map((slider) => slider.value), [1.0, 2.0, 0.0]);
@@ -502,28 +666,35 @@ void main() {
     },
   );
 
-  test('infinite weighted selection favors high weight and never ends', () {
+  test('a weight of 10 has five times the first-draw probability of 2', () {
     final entries = GameEntry.fromTable(words, {}).take(2).toList();
-    entries[0].personalImportance = 10;
-    entries[0].personalSuccess = 1;
-    entries[1].personalImportance = 1;
-    entries[1].personalSuccess = 10;
-    final game = GameSession(
-      entries: entries,
-      settings: const GameSettings(questionCount: null, weighted: true),
-      random: Random(42),
-    );
+    entries[0].results = entries[0].results.withImportance(10);
+    entries[1].results = entries[1].results.withImportance(2);
+    final random = Random(42);
     var first = 0;
-    for (var i = 0; i < 5000; i++) {
-      if (game.current == entries[0]) first++;
-      game.answer(GameAnswer.knew);
+    for (var index = 0; index < 6000; index++) {
+      final game = GameSession(
+        entries: entries,
+        random: random,
+        settings: const GameSettings(weighted: true, lowSuccessWeight: 0),
+      );
+      if (game.current == entries.first) first++;
     }
-    expect(first, inInclusiveRange(4450, 4650));
-    expect(game.total, isNull);
-    expect(game.finished, isFalse);
+    expect(first, inInclusiveRange(4900, 5100));
   });
 
   test('empty and numeric tables are handled without inventing a header', () {
+    const marked = KnowledgeTable(
+      name: 'Marked',
+      rows: [
+        ['Question', 'Notes*'],
+        ['one', 'note'],
+      ],
+    );
+    expect(GameEntry.fromTable(marked, {}).first.headers, [
+      'Question',
+      'Notes',
+    ]);
     expect(
       GameEntry.fromTable(const KnowledgeTable(name: 'Empty', rows: []), {}),
       isEmpty,
@@ -594,8 +765,8 @@ void main() {
       );
       await tester.tap(find.text('Setup'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Infinite'));
-      await tester.tap(find.text('Infinite'));
+      await tester.ensureVisible(find.text('All').first);
+      await tester.tap(find.text('All').first);
       await tester.tap(find.text('Selected'));
       await tester.pumpAndSettle();
       final disabled = tester.widget<FilledButton>(
@@ -611,8 +782,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Words'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Aggregated Chance'));
-      await tester.tap(find.text('Aggregated Chance'));
+      await tester.ensureVisible(find.text('Aggregated'));
+      await tester.tap(find.text('Aggregated'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Start Game'));
       await tester.pumpAndSettle();
@@ -709,10 +880,13 @@ void main() {
       await tester.tap(find.text('I knew'));
       await tester.pumpAndSettle();
       expect(find.text('Question 1 / 3'), findsOneWidget);
-      expect((await storage.loadTableRowData('Words'))![first]!.success, 6);
+      expect(
+        (await storage.loadTableRowData('Words'))![first]!.successCount,
+        1,
+      );
       await tester.tap(find.text('Failed'));
       await tester.pumpAndSettle();
-      expect((await storage.loadTableRowData('Words'))![first]!.success, 4);
+      expect((await storage.loadTableRowData('Words'))![first]!.failedCount, 1);
       await tester.tap(find.text('Next'));
       await tester.pumpAndSettle();
       expect(find.text('Question 2 / 3'), findsOneWidget);
@@ -732,12 +906,12 @@ void main() {
       expect(find.text('Almost: 1'), findsOneWidget);
       expect(find.text('Failed: 1'), findsOneWidget);
       final updated = (await storage.loadTableRowData('Words'))!;
-      expect(updated[first]!.success, 4);
+      expect(updated[first]!.failedCount, 1);
       expect(updated[first]!.importance, 4);
-      expect(updated[second]!.success, isNull);
-      expect(updated[third]!.success, 6);
+      expect(updated[second]!.successCount, 0);
+      expect(updated[third]!.successCount, 1);
       expect(updated[first]!.revealed, [true, true, true]);
-      expect(changes, 8);
+      expect(changes, 6);
       expect(updated.values.map((row) => row.appeared), everyElement(1));
       await tester.tap(find.text('New Round'));
       await tester.pumpAndSettle();
@@ -755,7 +929,7 @@ void main() {
     },
   );
 
-  testWidgets('Almost on a one-column entry leaves Success unset', (
+  testWidgets('Almost records one appearance and one Almost outcome', (
     tester,
   ) async {
     const single = KnowledgeTable(
@@ -780,7 +954,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Round complete'), findsOneWidget);
     final result = (await storage.loadPersonalResults())['Single']!['only']!;
-    expect(result.success, isNull);
+    expect(result.successCount, 0);
     expect(result.appeared, 1);
   });
 
@@ -823,54 +997,34 @@ void main() {
     },
   );
 
-  for (final limit in [1, 10]) {
-    testWidgets('Success remains within 1–10 when grading at $limit', (
-      tester,
-    ) async {
-      const single = KnowledgeTable(
-        name: 'Single',
-        rows: [
-          ['Question'],
-          ['only'],
-        ],
-      );
-      await storage.saveKnowledgeTables([single]);
-      await storage.saveTableRowData('Single', {
-        'only': RowSaveData(
-          rowOrder: 0,
-          revealed: [],
-          success: limit,
-          importance: limit,
-        ),
-      });
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: GameScreen(
-            tables: [single],
-            settings: GameSettings(questionCount: 1),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final button = find.byTooltip(
-        limit == 1 ? 'Decrease Importance' : 'Increase Importance',
-      );
-      expect(
-        tester
-            .widget<IconButton>(
-              find
-                  .ancestor(of: button, matching: find.byType(IconButton))
-                  .first,
-            )
-            .onPressed,
-        isNull,
-      );
-      await tester.tap(find.text(limit == 1 ? 'Failed' : 'I knew'));
-      await tester.pumpAndSettle();
-      expect(
-        (await storage.loadTableRowData('Single'))!['only']!.success,
-        limit,
-      );
+  testWidgets('outcome counts continue above ten', (tester) async {
+    const single = KnowledgeTable(
+      name: 'Single',
+      rows: [
+        ['Question'],
+        ['only'],
+      ],
+    );
+    await storage.saveKnowledgeTables([single]);
+    await storage.saveTableRowData('Single', {
+      'only': const RowSaveData(
+        rowOrder: 0,
+        revealed: [],
+        failedCount: 12,
+        almostCount: 7,
+        successCount: 15,
+      ),
     });
-  }
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: GameScreen(tables: [single], settings: GameSettings()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('I knew'));
+    await tester.pumpAndSettle();
+    final result = (await storage.loadTableRowData('Single'))!['only']!;
+    expect(result.successCount, 16);
+    expect(result.appeared, 35);
+  });
 }
