@@ -840,6 +840,11 @@ void main() {
         'gamma',
       ].firstWhere((key) => find.text(key).evaluate().isNotEmpty);
       final first = current();
+      final ratingCheckmark = find.byIcon(Icons.check);
+      Finder markedRating(String label) => find.descendant(
+        of: find.ancestor(of: ratingCheckmark, matching: find.byType(Wrap)),
+        matching: find.text(label),
+      );
       final exitPosition = tester.getCenter(find.byTooltip('Exit game'));
       final titlePosition = tester.getCenter(find.text('Question 1 / 3'));
       expect(exitPosition.dx, lessThan(titlePosition.dx));
@@ -864,6 +869,7 @@ void main() {
       await tester.tap(find.text('Show Answer'));
       await tester.pumpAndSettle();
       expect(find.text('example $first'), findsOneWidget);
+      expect(ratingCheckmark, findsNothing);
       await tester.tap(find.text('Failed'));
       await tester.pumpAndSettle();
       final second = current();
@@ -877,8 +883,11 @@ void main() {
       expect(find.text('Question 1 / 3'), findsOneWidget);
       expect(find.text('answer $first'), findsOneWidget);
       expect(find.text('Failed'), findsOneWidget);
+      expect(markedRating('Failed'), findsOneWidget);
       await tester.tap(find.text('I knew'));
       await tester.pumpAndSettle();
+      expect(ratingCheckmark, findsOneWidget);
+      expect(markedRating('I knew'), findsOneWidget);
       expect(find.text('Question 1 / 3'), findsOneWidget);
       expect(
         (await storage.loadTableRowData('Words'))![first]!.successCount,

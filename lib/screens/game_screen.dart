@@ -493,10 +493,23 @@ class _GameScreenState extends State<GameScreen> {
     return (baseSize * scale).clamp(min(14.0, baseSize), baseSize);
   }
 
+  Widget _ratingLabel(String label, bool selected) => Semantics(
+    selected: selected,
+    child: selected
+        ? Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 4,
+            children: [const Icon(Icons.check, size: 16), Text(label)],
+          )
+        : Text(label),
+  );
+
   @override
   Widget build(BuildContext context) {
     final session = _session;
     final playing = !_loading && _error == null && session?.current != null;
+    final currentAnswer = session?.currentAnswer;
     return PopScope(
       canPop: _allowPop,
       onPopInvokedWithResult: (didPop, result) {
@@ -606,7 +619,10 @@ class _GameScreenState extends State<GameScreen> {
                             onPressed: _saving
                                 ? null
                                 : () => _answer(GameAnswer.failed),
-                            child: const Text('Failed'),
+                            child: _ratingLabel(
+                              'Failed',
+                              currentAnswer == GameAnswer.failed,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -615,7 +631,10 @@ class _GameScreenState extends State<GameScreen> {
                             onPressed: _saving
                                 ? null
                                 : () => _answer(GameAnswer.almost),
-                            child: const Text('Almost'),
+                            child: _ratingLabel(
+                              'Almost',
+                              currentAnswer == GameAnswer.almost,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -624,7 +643,10 @@ class _GameScreenState extends State<GameScreen> {
                             onPressed: _saving
                                 ? null
                                 : () => _answer(GameAnswer.knew),
-                            child: const Text('I knew'),
+                            child: _ratingLabel(
+                              'I knew',
+                              currentAnswer == GameAnswer.knew,
+                            ),
                           ),
                         ),
                       ],
