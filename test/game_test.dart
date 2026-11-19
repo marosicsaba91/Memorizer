@@ -1006,6 +1006,54 @@ void main() {
     },
   );
 
+  testWidgets('comments save before rating and survive answering', (
+    tester,
+  ) async {
+    const single = KnowledgeTable(
+      name: 'Single',
+      rows: [
+        ['Question'],
+        ['only'],
+      ],
+    );
+    var changes = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: GameScreen(
+          tables: const [single],
+          settings: const GameSettings(),
+          onRatingsChanged: () async {
+            changes++;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('No comment yet'), findsOneWidget);
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('Comment'), findsNothing);
+    await tester.tap(find.byTooltip('No comment yet'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Remember this');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Close comment'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Comment saved'), findsOneWidget);
+    expect(changes, 1);
+    final saved = (await storage.loadPersonalResults())['Single']!['only']!;
+    expect(saved.comment, 'Remember this');
+    expect(saved.appeared, 0);
+    expect(find.byType(TextField), findsNothing);
+    await tester.tap(find.byTooltip('Comment saved'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Updated while answering');
+    await tester.tap(find.text('I knew'));
+    await tester.pumpAndSettle();
+    final rated = (await storage.loadPersonalResults())['Single']!['only']!;
+    expect(rated.comment, 'Updated while answering');
+    expect(rated.successCount, 1);
+  });
+
   testWidgets('outcome counts continue above ten', (tester) async {
     const single = KnowledgeTable(
       name: 'Single',

@@ -44,7 +44,7 @@ function endpoint() {
   });
   vm.runInContext(fs.readFileSync('docs/personal-sync.gs', 'utf8'), context);
   return { rows, get: () => context.doGet(), post: entries => context.doPost({
-    postData: { contents: JSON.stringify({ version: 3, mode: 'replace', entries }) },
+    postData: { contents: JSON.stringify({ version: 4, mode: 'replace', entries }) },
   }) };
 }
 
@@ -55,10 +55,10 @@ function result(values = {}) {
 
 test('creates counter columns and keeps Importance blank when unset', () => {
   const api = endpoint();
-  assert.deepEqual(api.get(), {ok: true, version: 3, entries: []});
-  assert.deepEqual(api.rows[0], ['Table', 'Entry', 'Appeared Count', 'Failed Count', 'Almost Count', 'Success Count', 'Importance']);
+  assert.deepEqual(api.get(), {ok: true, version: 4, entries: []});
+  assert.deepEqual(api.rows[0], ['Table', 'Entry', 'Appeared Count', 'Failed Count', 'Almost Count', 'Success Count', 'Importance', 'Comment']);
   assert.equal(api.post([result({entry: '=one', failedCount: 2, almostCount: 3, successCount: 4})]).ok, true);
-  assert.deepEqual(api.rows[1], ['Words', '=one', 9, 2, 3, 4, '']);
+  assert.deepEqual(api.rows[1], ['Words', '=one', 9, 2, 3, 4, '', '']);
   assert.deepEqual(api.get().entries, [result({entry: '=one', importance: null, failedCount: 2, almostCount: 3, successCount: 4})]);
 });
 
@@ -80,6 +80,25 @@ test('negative and inconsistent counts leave the old snapshot intact', () => {
   assert.equal(api.get().entries[0].successCount, 8);
 });
 
+test('upgrades an existing results sheet and syncs comments without ratings', () => {
+  const api = endpoint();
+  api.post([result({successCount: 8})]);
+  api.rows[0].pop();
+  api.rows[1].pop();
+  assert.deepEqual(api.get().entries, [result({importance: null, successCount: 8})]);
+  assert.equal(api.rows[0][7], 'Comment');
+
+  const comment = '=1+1\nSecond line';
+  const note = result({entry: 'two', comment});
+  assert.equal(api.post([result({successCount: 8}), note]).ok, true);
+  assert.deepEqual(api.get().entries, [
+    result({importance: null, successCount: 8}),
+    {...note, importance: null},
+  ]);
+  assert.equal(api.post([result({successCount: 8}), result({entry: 'two'})]).ok, true);
+  assert.deepEqual(api.get().entries, [result({importance: null, successCount: 8})]);
+});
+
 test('legacy four and five column sheets migrate Importance without fabricating outcomes', () => {
   for (const headers of [['Table', 'Entry', 'Importance', 'Success'], ['Table', 'Entry', 'Importance', 'Success', 'Appered']]) {
     const api = endpoint();
@@ -88,6 +107,6 @@ test('legacy four and five column sheets migrate Importance without fabricating 
     api.rows.push(['Words', 'one', 8, 9, 12]);
     api.rows.push(['Words', 'two', '', 7, 5]);
     assert.deepEqual(api.get().entries, [result({importance: 8})]);
-    assert.equal(api.rows[0].length, 7);
+    assert.equal(api.rows[0].length, 8);
   }
 });

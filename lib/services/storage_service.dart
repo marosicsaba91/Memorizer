@@ -420,6 +420,7 @@ class StorageService {
         rowOrder: study?.rowOrder ?? result.length,
         revealed: study?.revealed ?? const [],
         importance: row.value.importance,
+        comment: row.value.comment,
         failedCount: row.value.failedCount,
         almostCount: row.value.almostCount,
         successCount: row.value.successCount,

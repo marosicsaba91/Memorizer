@@ -122,6 +122,7 @@ class _KnowledgeTableScreenState extends State<KnowledgeTableScreen> {
         failedCount: _results[origIdx].failedCount,
         almostCount: _results[origIdx].almostCount,
         successCount: _results[origIdx].successCount,
+        comment: _results[origIdx].comment,
         importance: _importanceOverrides[origIdx],
       );
     }

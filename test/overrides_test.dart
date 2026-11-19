@@ -151,7 +151,7 @@ void main() {
     ];
     final client = MockClient(
       (_) async => http.Response(
-        jsonEncode({'ok': true, 'version': 3, 'entries': entries}),
+        jsonEncode({'ok': true, 'version': 4, 'entries': entries}),
         200,
       ),
     );
@@ -175,11 +175,11 @@ void main() {
     () async {
       final client = MockClient((request) async {
         expect(jsonDecode(request.body), {
-          'version': 3,
+          'version': 4,
           'mode': 'replace',
           'entries': [],
         });
-        return http.Response(jsonEncode({'ok': true, 'version': 3}), 200);
+        return http.Response(jsonEncode({'ok': true, 'version': 4}), 200);
       });
       addTearDown(client.close);
       expect(await RatingsSyncService(client: client).upload(url), 0);

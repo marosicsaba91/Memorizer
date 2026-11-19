@@ -24,7 +24,7 @@ const table = KnowledgeTable(
 http.Response response(Object value) => http.Response(jsonEncode(value), 200);
 Map<String, dynamic> ratings() => {
   'ok': true,
-  'version': 3,
+  'version': 4,
   'entries': [
     {
       'table': 'Words',
@@ -99,7 +99,7 @@ void main() {
         expect(request.method, 'POST');
         expect(request.headers['content-type'], startsWith('text/plain'));
         final body = jsonDecode(request.body) as Map;
-        expect(body['version'], 3);
+        expect(body['version'], 4);
         expect(body['entries'], [
           {
             'table': 'Words',
@@ -118,7 +118,7 @@ void main() {
       }
       expect(request.method, 'GET');
       expect(request.url.host, 'script.googleusercontent.com');
-      return response({'ok': true, 'version': 3});
+      return response({'ok': true, 'version': 4});
     });
     addTearDown(client.close);
     expect(await RatingsSyncService(client: client).upload(url), 1);
@@ -145,7 +145,7 @@ void main() {
       final client = MockClient((request) async {
         methods.add(request.method);
         return response(
-          request.method == 'GET' ? ratings() : {'ok': true, 'version': 3},
+          request.method == 'GET' ? ratings() : {'ok': true, 'version': 4},
         );
       });
       addTearDown(client.close);
@@ -192,7 +192,7 @@ void main() {
           methods.add(request.method);
           if (request.method == 'POST') {
             expect(jsonDecode(request.body)['entries'].first['importance'], 9);
-            return response({'ok': true, 'version': 3});
+            return response({'ok': true, 'version': 4});
           }
           return response(ratings());
         });

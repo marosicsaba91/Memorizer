@@ -67,9 +67,9 @@ class RatingsSyncService {
           decoded['error'] ?? 'The sync server rejected the request.',
         );
       }
-      if (decoded['version'] != 3) {
+      if (decoded['version'] != 4) {
         throw const FormatException(
-          'Update and redeploy personal-sync.gs to use question result counters.',
+          'Update and redeploy personal-sync.gs to sync comments.',
         );
       }
       return decoded;
@@ -80,7 +80,7 @@ class RatingsSyncService {
 
   Future<int> download(String url) => _enqueue(() async {
     final data = await _request(url);
-    if (data['version'] != 3 || data['entries'] is! List) {
+    if (data['entries'] is! List) {
       throw const FormatException('Unsupported sync data format.');
     }
     final updates = <String, Map<String, RowSaveData>>{};
@@ -117,6 +117,10 @@ class RatingsSyncService {
       final almostCount = count('almostCount');
       final successCount = count('successCount');
       final appearedCount = count('appearedCount');
+      final comment = item['comment'];
+      if (comment != null && comment is! String) {
+        throw const FormatException('Comment must be text.');
+      }
       if (appearedCount != failedCount + almostCount + successCount) {
         throw const FormatException(
           'Appeared Count must equal the sum of result counts.',
@@ -127,6 +131,7 @@ class RatingsSyncService {
         rowOrder: 0,
         revealed: const [],
         importance: rating('importance'),
+        comment: (comment as String?) ?? '',
         failedCount: failedCount,
         almostCount: almostCount,
         successCount: successCount,
@@ -159,7 +164,7 @@ class RatingsSyncService {
     }
     await _request(
       url,
-      body: {'version': 3, 'mode': 'replace', 'entries': entries},
+      body: {'version': 4, 'mode': 'replace', 'entries': entries},
     );
     return entries.length;
   });

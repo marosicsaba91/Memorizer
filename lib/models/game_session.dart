@@ -235,6 +235,7 @@ class GameSession {
       rowOrder: saved.rowOrder,
       revealed: saved.revealed,
       importance: saved.importance,
+      comment: saved.comment,
       failedCount: adjust(GameAnswer.failed, saved.failedCount),
       almostCount: adjust(GameAnswer.almost, saved.almostCount),
       successCount: adjust(GameAnswer.knew, saved.successCount),

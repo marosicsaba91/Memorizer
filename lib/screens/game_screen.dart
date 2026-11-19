@@ -29,11 +29,13 @@ class GameScreen extends StatefulWidget {
 class _GameScreenState extends State<GameScreen> {
   final _storage = StorageService();
   final _scroll = ScrollController();
+  final _commentController = TextEditingController();
   GameSession? _session;
   List<bool> _revealed = [];
   final Map<int, List<bool>> _questionReveals = {};
   bool _loading = true;
   bool _saving = false;
+  bool _commentOpen = false;
   bool _allowPop = false;
   bool _exitDialogOpen = false;
   String? _error;
@@ -78,6 +80,8 @@ class _GameScreenState extends State<GameScreen> {
 
   void _prepareQuestion() {
     final entry = _session?.current;
+    _commentOpen = false;
+    _commentController.text = entry?.results.comment ?? '';
     _revealed = _questionReveals.putIfAbsent(
       _session!.questionNumber,
       () => List.generate(
@@ -88,8 +92,8 @@ class _GameScreenState extends State<GameScreen> {
     if (_scroll.hasClients) _scroll.jumpTo(0);
   }
 
-  void _navigateQuestion({required bool forward}) {
-    if (_saving) return;
+  Future<void> _navigateQuestion({required bool forward}) async {
+    if (!await _saveComment() || !mounted) return;
     setState(() {
       if (forward) {
         _session!.goForward();
@@ -108,6 +112,7 @@ class _GameScreenState extends State<GameScreen> {
       rowOrder: previous?.rowOrder ?? saved.length,
       revealed: previous?.revealed ?? const [],
       importance: updated.importance,
+      comment: updated.comment,
       failedCount: updated.failedCount,
       almostCount: updated.almostCount,
       successCount: updated.successCount,
@@ -157,12 +162,15 @@ class _GameScreenState extends State<GameScreen> {
     final entry = _session!.current!;
     setState(() => _saving = true);
     try {
-      final result = _session!.resultForAnswer(answer);
+      final result = _session!
+          .resultForAnswer(answer)
+          .withComment(_commentController.text.trim());
       await _persist(entry, result: result);
       unawaited(_notifyChanged());
       if (!mounted) return;
       setState(() {
         _session!.answer(answer);
+        entry.results = result;
         _prepareQuestion();
       });
     } catch (error) {
@@ -170,6 +178,32 @@ class _GameScreenState extends State<GameScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not save result: $error')),
         );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<bool> _saveComment() async {
+    if (_saving) return false;
+    final entry = _session?.current;
+    if (entry == null) return true;
+    final comment = _commentController.text.trim();
+    if (comment == entry.results.comment) return true;
+    final updated = entry.results.withComment(comment);
+    setState(() => _saving = true);
+    try {
+      await _persist(entry, result: updated);
+      entry.results = updated;
+      unawaited(_notifyChanged());
+      if (mounted) _commentController.text = comment;
+      return true;
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save comment: $error')),
+        );
+      }
+      return false;
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -183,7 +217,7 @@ class _GameScreenState extends State<GameScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Exit game?'),
         content: const Text(
-          'Your rating changes are saved. Round progress will be discarded.',
+          'Saved results will be kept. Round progress will be discarded.',
         ),
         actions: [
           TextButton(
@@ -198,7 +232,9 @@ class _GameScreenState extends State<GameScreen> {
       ),
     );
     _exitDialogOpen = false;
-    if (exit == true && mounted) _backToMain();
+    if (exit == true && mounted && await _saveComment() && mounted) {
+      _backToMain();
+    }
   }
 
   void _showQuestionInfo() {
@@ -345,7 +381,52 @@ class _GameScreenState extends State<GameScreen> {
   @override
   void dispose() {
     _scroll.dispose();
+    _commentController.dispose();
     super.dispose();
+  }
+
+  Widget _commentPanel(GameEntry entry) {
+    final hasComment = entry.results.comment.isNotEmpty;
+    if (!_commentOpen) {
+      return Align(
+        alignment: Alignment.centerRight,
+        child: IconButton(
+          tooltip: hasComment ? 'Comment saved' : 'No comment yet',
+          icon: Icon(hasComment ? Icons.comment : Icons.comment_outlined),
+          onPressed: _saving ? null : () => setState(() => _commentOpen = true),
+        ),
+      );
+    }
+    return Card(
+      child: Column(
+        children: [
+          ListTile(
+            title: const Text('Comment'),
+            trailing: IconButton(
+              tooltip: 'Close comment',
+              icon: const Icon(Icons.expand_less),
+              onPressed: _saving
+                  ? null
+                  : () async {
+                      if (await _saveComment() && mounted) {
+                        setState(() => _commentOpen = false);
+                      }
+                    },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: TextField(
+              controller: _commentController,
+              readOnly: _saving,
+              minLines: 2,
+              maxLines: 6,
+              decoration: const InputDecoration(hintText: 'Add a comment'),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _summary(GameSession session) => Center(
@@ -430,55 +511,59 @@ class _GameScreenState extends State<GameScreen> {
           child: ListView.builder(
             controller: _scroll,
             padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-            itemCount: entry.cells.length,
-            itemBuilder: (context, index) => Card(
-              color: _revealed[index]
-                  ? Theme.of(context).colorScheme.surface
-                  : Theme.of(context).colorScheme.secondaryContainer,
-              child: InkWell(
-                onTap: _saving
-                    ? null
-                    : () =>
-                          setState(() => _revealed[index] = !_revealed[index]),
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (!_revealed[index]) ...[
+            itemCount: entry.cells.length + 1,
+            itemBuilder: (context, index) {
+              if (index == entry.cells.length) return _commentPanel(entry);
+              return Card(
+                color: _revealed[index]
+                    ? Theme.of(context).colorScheme.surface
+                    : Theme.of(context).colorScheme.secondaryContainer,
+                child: InkWell(
+                  onTap: _saving
+                      ? null
+                      : () => setState(
+                          () => _revealed[index] = !_revealed[index],
+                        ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (!_revealed[index]) ...[
+                          Text(
+                            entry.headers[index],
+                            style: Theme.of(context).textTheme.labelMedium,
+                          ),
+                          const SizedBox(height: 12),
+                        ],
                         Text(
-                          entry.headers[index],
-                          style: Theme.of(context).textTheme.labelMedium,
+                          _revealed[index]
+                              ? (entry.cells[index].isEmpty
+                                    ? '—'
+                                    : entry.cells[index])
+                              : 'Tap to reveal',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: _revealed[index]
+                                ? _infoFontSize(
+                                    entry.cells[index],
+                                    entry.table.textSize ?? 20,
+                                  )
+                                : 18,
+                            color: _revealed[index]
+                                ? null
+                                : Theme.of(context)
+                                      .colorScheme
+                                      .onSecondaryContainer
+                                      .withValues(alpha: 0.5),
+                          ),
                         ),
-                        const SizedBox(height: 12),
                       ],
-                      Text(
-                        _revealed[index]
-                            ? (entry.cells[index].isEmpty
-                                  ? '—'
-                                  : entry.cells[index])
-                            : 'Tap to reveal',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: _revealed[index]
-                              ? _infoFontSize(
-                                  entry.cells[index],
-                                  entry.table.textSize ?? 20,
-                                )
-                              : 18,
-                          color: _revealed[index]
-                              ? null
-                              : Theme.of(context)
-                                    .colorScheme
-                                    .onSecondaryContainer
-                                    .withValues(alpha: 0.5),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
         ),
       ],
@@ -591,7 +676,13 @@ class _GameScreenState extends State<GameScreen> {
                   ),
                 if (playing && session!.roundComplete)
                   TextButton(
-                    onPressed: () => setState(() => session.showSummary()),
+                    onPressed: _saving
+                        ? null
+                        : () async {
+                            if (await _saveComment() && mounted) {
+                              setState(() => session.showSummary());
+                            }
+                          },
                     child: const Text('Back to Summary'),
                   ),
                 if (playing)

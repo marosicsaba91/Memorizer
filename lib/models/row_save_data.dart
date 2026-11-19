@@ -5,6 +5,7 @@ class RowSaveData {
   final int almostCount;
   final int successCount;
   final int? importance;
+  final String comment;
 
   const RowSaveData({
     required this.rowOrder,
@@ -13,10 +14,12 @@ class RowSaveData {
     this.almostCount = 0,
     this.successCount = 0,
     this.importance,
+    this.comment = '',
   });
 
   int get appeared => failedCount + almostCount + successCount;
-  bool get hasPersonalResults => importance != null || appeared > 0;
+  bool get hasPersonalResults =>
+      importance != null || appeared > 0 || comment.isNotEmpty;
 
   // Retain the centered scale used by table colors and sorting.
   int get successRating => (5 + successCount - failedCount).clamp(1, 10);
@@ -25,6 +28,17 @@ class RowSaveData {
     rowOrder: rowOrder,
     revealed: revealed,
     importance: value,
+    comment: comment,
+    failedCount: failedCount,
+    almostCount: almostCount,
+    successCount: successCount,
+  );
+
+  RowSaveData withComment(String value) => RowSaveData(
+    rowOrder: rowOrder,
+    revealed: revealed,
+    importance: importance,
+    comment: value,
     failedCount: failedCount,
     almostCount: almostCount,
     successCount: successCount,
@@ -36,6 +50,7 @@ class RowSaveData {
     'almostCount': almostCount,
     'successCount': successCount,
     if (importance != null) 'importance': importance,
+    if (comment.isNotEmpty) 'comment': comment,
   };
 
   Map<String, dynamic> toJson() => {
@@ -56,6 +71,7 @@ class RowSaveData {
           .map((value) => value == true)
           .toList(),
       importance: (json['importance'] as int?)?.clamp(0, 10),
+      comment: json['comment'] is String ? json['comment'] as String : '',
       failedCount: count('failedCount'),
       almostCount: count('almostCount'),
       successCount: count('successCount'),
